@@ -1,0 +1,67 @@
+﻿{
+    "steamAppId":  3079210,
+    "playerNameFile":  "name.txt",
+    "seedBelowPlayers":  50,
+    "seededAtPlayers":  50,
+    "maxPlayers":  100,
+    "launchWaitSeconds":  80,
+    "postClickWaitSeconds":  60,
+    "pollSeconds":  60,
+    "reconnectWaitSeconds":  60,
+    "closeGraceSeconds":  30,
+    "uiAutomation":  {
+                         "enabled":  true,
+                         "referenceWidth":  1920,
+                         "referenceHeight":  1080,
+                         "focusX":  500,
+                         "focusY":  500,
+                         "enlistX":  135,
+                         "enlistY":  681,
+                         "searchX":  1605,
+                         "searchY":  150,
+                         "joinX":  1295,
+                         "joinY":  236,
+                         "menuReadyWaitSeconds":  15,
+                         "afterFocusClickWaitSeconds":  15,
+                         "browserWaitSeconds":  10,
+                         "searchWaitSeconds":  8,
+                         "joinWaitSeconds":  60
+                     },
+    "gameProcessNames":  [
+                             "HLLVietnam-Win64-Shipping",
+                             "HLLV-Win64-Shipping",
+                             "HellLetLooseVietnam-Win64-Shipping",
+                             "HellLetLooseVietnam",
+                             "HLL-Win64-Shipping"
+                         ],
+    "servers":  [
+                    {
+                        "name":  "EASY Company #1 | NA EAST | MIXED | DISCORD.GG/EASYCOMPANY | QONZER",
+                        "easyStatsUrl":  "https://stats5.easyhll.com",
+                        "battleMetricsId":  "",
+                        "searchText":  "EASY Company #1",
+                        "enabled":  true
+                    },
+                    {
+                        "name":  "EASY Company #2 | NA CENTRAL | MIXED | DISCORD.GG/EASYCOMPANY | QONZER",
+                        "easyStatsUrl":  "https://stats3.easyhll.com",
+                        "battleMetricsId":  "",
+                        "searchText":  "EASY Company #2",
+                        "enabled":  true
+                    },
+                    {
+                        "name":  "EASY Company #3 | NA CENTRAL | WARFARE | DISCORD.GG/EASYCOMPANY | QONZER",
+                        "easyStatsUrl":  "https://stats4.easyhll.com",
+                        "battleMetricsId":  "",
+                        "searchText":  "EASY Company #3",
+                        "enabled":  true
+                    },
+                    {
+                        "name":  "EASY Company #4 | NA WEST | MIXED | DISCORD.GG/EASYCOMPANY | QONZER",
+                        "easyStatsUrl":  "https://stats2.easyhll.com",
+                        "battleMetricsId":  "",
+                        "searchText":  "EASY Company #4",
+                        "enabled":  true
+                    }
+                ]
+}
