@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.1.0
+
+- Adds a clean live status dashboard in the PowerShell window.
+- Adds countdown display for the next server check.
+- Keeps detailed troubleshooting history in `log.txt`.
+
 ## v1.0.2
 
 - Checks all servers under 50 players.

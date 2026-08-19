@@ -239,6 +239,72 @@ function Write-Log {
     Write-Host "[$time] $Message"
 }
 
+function Format-ServerStatusLine {
+    param([object]$Status)
+
+    if (!$Status) {
+        return ""
+    }
+
+    $statusText = if ($Status.IsActiveSeed) {
+        "ACTIVE SEED"
+    } elseif ($Status.IsUnderSeedThreshold) {
+        "UNDER 50"
+    } else {
+        "NOT SEEDING"
+    }
+
+    "Server #$($Status.ServerNumber): $($Status.Players)/100 - $statusText"
+}
+
+function Show-SeedingDashboard {
+    param(
+        [string]$PlayerName,
+        [object[]]$ServerStatuses = @(),
+        [string]$Message = "Checking servers...",
+        [int]$NextCheckSeconds = -1
+    )
+
+    Clear-Host
+    Write-Host "EASY HLLV Seeding Helper v1.0.2"
+    Write-Host ""
+    Write-Host "Player: $PlayerName"
+    Write-Host "Status: $Message"
+    Write-Host ""
+
+    if ($ServerStatuses.Count -gt 0) {
+        foreach ($status in ($ServerStatuses | Sort-Object @{ Expression = "Order"; Descending = $false })) {
+            Write-Host (Format-ServerStatusLine -Status $status)
+        }
+    } else {
+        Write-Host "Server #1: waiting for check"
+        Write-Host "Server #2: waiting for check"
+        Write-Host "Server #3: waiting for check"
+        Write-Host "Server #4: waiting for check"
+    }
+
+    Write-Host ""
+    if ($NextCheckSeconds -ge 0) {
+        Write-Host "Next check in $NextCheckSeconds seconds"
+    } else {
+        Write-Host "Next check: working..."
+    }
+}
+
+function Wait-WithDashboardCountdown {
+    param(
+        [int]$Seconds,
+        [string]$PlayerName,
+        [object[]]$ServerStatuses = @(),
+        [string]$Message = "Waiting..."
+    )
+
+    for ($remaining = $Seconds; $remaining -gt 0; $remaining--) {
+        Show-SeedingDashboard -PlayerName $PlayerName -ServerStatuses $ServerStatuses -Message $Message -NextCheckSeconds $remaining
+        Start-Sleep -Seconds 1
+    }
+}
+
 function Get-ServerNumber {
     param([object]$Server)
 
@@ -573,6 +639,8 @@ Write-Host "Player: $steamName"
 Write-Host "Config: $ConfigPath"
 Write-Host ""
 
+Show-SeedingDashboard -PlayerName $steamName -Message "Starting server checks..."
+
 do {
     Stop-Game -Config $config
 
@@ -608,6 +676,8 @@ do {
         }
     }
 
+    Show-SeedingDashboard -PlayerName $steamName -ServerStatuses $serverStatuses -Message "Finished checking all servers."
+
     $targetStatus = @($serverStatuses |
         Where-Object { $_.IsActiveSeed } |
         Sort-Object @{ Expression = "Players"; Descending = $true }, @{ Expression = "Order"; Descending = $false } |
@@ -622,7 +692,7 @@ do {
         if ($targetStatus.Count -eq 0) {
             Write-Log "No EASY HLLV servers are under $($config.seedBelowPlayers) players. Checking again in $($config.pollSeconds) seconds."
             if ($Once) { break }
-            Start-Sleep -Seconds ([int]$config.pollSeconds)
+            Wait-WithDashboardCountdown -Seconds ([int]$config.pollSeconds) -PlayerName $steamName -ServerStatuses $serverStatuses -Message "No servers under 50. Waiting to check again."
             continue
         }
 
@@ -631,12 +701,14 @@ do {
 
     $server = $targetStatus[0].Server
     Write-Log "Best seeding target is server #$($targetStatus[0].ServerNumber) at $($targetStatus[0].Players)/$($config.maxPlayers). Connecting now."
+    Show-SeedingDashboard -PlayerName $steamName -ServerStatuses $serverStatuses -Message "Joining server #$($targetStatus[0].ServerNumber) now."
     Start-Server -Config $config -Server $server -SteamPath $steamPath
 
     $players = [int]$targetStatus[0].Players
     $restartScan = $false
     do {
-        Start-Sleep -Seconds ([int]$config.pollSeconds)
+        $serverNumber = Get-ServerNumber -Server $server
+        Wait-WithDashboardCountdown -Seconds ([int]$config.pollSeconds) -PlayerName $steamName -ServerStatuses $serverStatuses -Message "You are seeding server #$serverNumber."
         try {
             $players = Get-PlayerCount -Server $server
             $connected = Test-PlayerConnected -Server $server -PlayerProfile $playerProfile
@@ -653,6 +725,14 @@ do {
         } else {
             $serverNumber = Get-ServerNumber -Server $server
             Write-Log "You are seeding server #$serverNumber. Population is $players/$($config.maxPlayers)."
+            foreach ($status in $serverStatuses) {
+                if ($status.ServerNumber -eq $serverNumber) {
+                    $status.Players = $players
+                    $status.IsUnderSeedThreshold = $players -lt [int]$config.seedBelowPlayers
+                    $status.IsActiveSeed = $players -gt [int]$config.activeSeedPlayers -and $status.IsUnderSeedThreshold
+                }
+            }
+            Show-SeedingDashboard -PlayerName $steamName -ServerStatuses $serverStatuses -Message "You are seeding server #$serverNumber. Population is $players/$($config.maxPlayers)."
         }
     } until ($restartScan -or $players -gt [int]$config.seededAtPlayers)
 
