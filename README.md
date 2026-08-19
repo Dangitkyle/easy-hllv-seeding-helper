@@ -20,7 +20,6 @@
 ## Important
 
 - Your Steam name must match what HLLV/EASY stats shows 100%.
-- Do not include the `[EASY]` tag, even if it appears beside your name in-game or in stats.
 - Capital letters, spaces, punctuation, and numbers matter.
 - Do not click around while the script is opening HLLV and joining a server.
 - Do not close the seeder window unless you want the seeder to stop.
@@ -34,7 +33,7 @@ If you typed your name wrong, open PowerShell in this folder and run:
 Powershell.exe -STA -ExecutionPolicy Bypass -File ".\HLLVSeeding.ps1" -Setup
 ```
 
-Then enter your correct Steam name letter-for-letter. Do not include the `[EASY]` tag.
+Then enter your correct Steam name letter-for-letter.
 
 ## Need Help?
 

@@ -490,7 +490,7 @@ function Get-PlayerProfile {
     Write-Host "This saves your personal player info on this PC only."
     Write-Host ""
 
-    $playerName = Read-RequiredValue -Prompt "Enter your Steam name letter-for-letter exactly as it appears in HLLV stats. Do not include the [EASY] tag"
+    $playerName = Read-RequiredValue -Prompt "Enter your Steam name letter-for-letter exactly as it appears in HLLV stats"
 
     $profile = [ordered]@{
         playerName = $playerName
