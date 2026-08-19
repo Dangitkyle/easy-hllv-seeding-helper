@@ -2,6 +2,7 @@
     "steamAppId":  3079210,
     "playerNameFile":  "name.txt",
     "seedBelowPlayers":  50,
+    "activeSeedPlayers":  3,
     "seededAtPlayers":  50,
     "maxPlayers":  100,
     "launchWaitSeconds":  80,

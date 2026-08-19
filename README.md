@@ -1,4 +1,4 @@
-# EASY HLLV Seeding Helper v1.0.1
+# EASY HLLV Seeding Helper v1.0.2
 
 ## How To Use
 
@@ -12,7 +12,9 @@
 ## What It Does
 
 - Checks EASY HLLV servers once per minute.
-- Joins the best EASY server under 50 players.
+- Checks servers in #1 to #4 order.
+- Joins an active seed first if a server under 50 already has more than 3 players.
+- If no server has more than 3 players, joins the first server under 50 in #1 to #4 order.
 - Stops seeding that server after it reaches 50 players.
 - If you get kicked or disconnected, it closes HLLV and checks all servers again.
 - If EASY stats has a temporary error, it waits and tries again.

@@ -189,7 +189,8 @@ $DefaultConfig = [ordered]@{
     playerProfileFile = "player-profile.json"
     playerNameFile = "name.txt"
     seedBelowPlayers = 50
-    seededAtPlayers = 70
+    activeSeedPlayers = 3
+    seededAtPlayers = 50
     maxPlayers = 100
     launchWaitSeconds = 80
     postClickWaitSeconds = 120
@@ -264,6 +265,7 @@ function Get-Config {
     $config = Get-Content -Path $ConfigPath -Raw | ConvertFrom-Json
     if (!$config.steamAppId) { $config | Add-Member -NotePropertyName steamAppId -NotePropertyValue 3079210 }
     if (!$config.playerProfileFile) { $config | Add-Member -NotePropertyName playerProfileFile -NotePropertyValue "player-profile.json" }
+    if (!$config.activeSeedPlayers) { $config | Add-Member -NotePropertyName activeSeedPlayers -NotePropertyValue 3 }
     if (!$config.gameProcessNames) { $config | Add-Member -NotePropertyName gameProcessNames -NotePropertyValue $DefaultConfig.gameProcessNames }
     if (!$config.servers -or $config.servers.Count -eq 0) {
         throw "No servers are configured. Add at least one server to $ConfigPath."
@@ -586,9 +588,12 @@ do {
             continue
         }
 
-        $isBeingSeeded = $players -lt [int]$config.seedBelowPlayers
-        if ($isBeingSeeded) {
-            Write-Log "Server #$serverNumber is $players/$($config.maxPlayers) - being seeded."
+        $isUnderSeedThreshold = $players -lt [int]$config.seedBelowPlayers
+        $isActiveSeed = $players -gt [int]$config.activeSeedPlayers -and $isUnderSeedThreshold
+        if ($isActiveSeed) {
+            Write-Log "Server #$serverNumber is $players/$($config.maxPlayers) - active seed."
+        } elseif ($isUnderSeedThreshold) {
+            Write-Log "Server #$serverNumber is $players/$($config.maxPlayers) - under 50, available by server order."
         } else {
             Write-Log "Server #$serverNumber is $players/$($config.maxPlayers) - not seeding right now."
         }
@@ -598,20 +603,30 @@ do {
             ServerNumber = $serverNumber
             Players = $players
             Order = $index
-            IsBeingSeeded = $isBeingSeeded
+            IsUnderSeedThreshold = $isUnderSeedThreshold
+            IsActiveSeed = $isActiveSeed
         }
     }
 
     $targetStatus = @($serverStatuses |
-        Where-Object { $_.IsBeingSeeded } |
+        Where-Object { $_.IsActiveSeed } |
         Sort-Object @{ Expression = "Players"; Descending = $true }, @{ Expression = "Order"; Descending = $false } |
         Select-Object -First 1)
 
     if ($targetStatus.Count -eq 0) {
-        Write-Log "No EASY HLLV servers are under $($config.seedBelowPlayers) players. Checking again in $($config.pollSeconds) seconds."
-        if ($Once) { break }
-        Start-Sleep -Seconds ([int]$config.pollSeconds)
-        continue
+        $targetStatus = @($serverStatuses |
+            Where-Object { $_.IsUnderSeedThreshold } |
+            Sort-Object @{ Expression = "Order"; Descending = $false } |
+            Select-Object -First 1)
+
+        if ($targetStatus.Count -eq 0) {
+            Write-Log "No EASY HLLV servers are under $($config.seedBelowPlayers) players. Checking again in $($config.pollSeconds) seconds."
+            if ($Once) { break }
+            Start-Sleep -Seconds ([int]$config.pollSeconds)
+            continue
+        }
+
+        Write-Log "No active seed has more than $($config.activeSeedPlayers) players. Using server order priority."
     }
 
     $server = $targetStatus[0].Server

@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.0.2
+
+- Checks all servers under 50 players.
+- Prioritizes active seeds with more than 3 players.
+- Uses #1 to #4 server order when no active seed has more than 3 players.
+
 ## v1.0.1
 
 - Finds Steam from Windows registry entries, not only the default install folder.
