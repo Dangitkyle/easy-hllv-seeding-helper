@@ -1,4 +1,4 @@
-# EASY HLLV Seeding Helper v1.0.0
+# EASY HLLV Seeding Helper v1.0.1
 
 ## How To Use
 
@@ -38,3 +38,5 @@ Then enter your correct Steam name letter-for-letter.
 ## Need Help?
 
 Send `log.txt` to whoever is helping you troubleshoot.
+
+If the seeder cannot open HLLV, open Steam once, then run `SeedHLLVServers.bat` again.

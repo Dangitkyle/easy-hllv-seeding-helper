@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.0.1
+
+- Finds Steam from Windows registry entries, not only the default install folder.
+- Falls back to Steam URL launching if `steam.exe` cannot be found directly.
+- Adds a user-facing note to open Steam once if HLLV does not launch.
+
 ## v1.0.0
 
 - Initial public EASY HLLV seeding helper release.

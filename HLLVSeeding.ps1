@@ -272,14 +272,40 @@ function Get-Config {
 }
 
 function Get-SteamPath {
+    param([int]$AppId)
+
     $steamProcess = Get-Process "Steam" -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($steamProcess -and $steamProcess.Path -and (Test-Path -Path $steamProcess.Path)) {
         return $steamProcess.Path
     }
 
+    $registryPaths = @(
+        "HKCU:\Software\Valve\Steam",
+        "HKLM:\SOFTWARE\Valve\Steam",
+        "HKLM:\SOFTWARE\WOW6432Node\Valve\Steam"
+    )
+    foreach ($registryPath in $registryPaths) {
+        $steamKey = Get-ItemProperty -Path $registryPath -ErrorAction SilentlyContinue
+        foreach ($value in @($steamKey.SteamExe, $steamKey.InstallPath, $steamKey.SteamPath)) {
+            if ([string]::IsNullOrWhiteSpace($value)) {
+                continue
+            }
+
+            $candidate = $value
+            if ((Split-Path -Leaf $candidate) -ne "steam.exe") {
+                $candidate = Join-Path $candidate "steam.exe"
+            }
+
+            if (Test-Path -Path $candidate) {
+                return $candidate
+            }
+        }
+    }
+
     $knownPaths = @(
         "$env:ProgramFiles(x86)\Steam\steam.exe",
-        "$env:ProgramFiles\Steam\steam.exe"
+        "$env:ProgramFiles\Steam\steam.exe",
+        "$env:LOCALAPPDATA\Steam\steam.exe"
     )
     foreach ($knownPath in $knownPaths) {
         if ($knownPath -and (Test-Path -Path $knownPath)) {
@@ -287,7 +313,8 @@ function Get-SteamPath {
         }
     }
 
-    throw "Could not find steam.exe. Start Steam once, or install Steam in the default location."
+    Write-Log "Could not find steam.exe. Falling back to Steam URL launch."
+    return "steam://rungameid/$AppId"
 }
 
 function Get-GameProcesses {
@@ -396,11 +423,19 @@ function Start-Server {
     Write-Log "Launching $($Server.name) with Steam App ID $($Config.steamAppId)."
 
     if ($DryRun) {
-        Write-Host "DRY RUN: Start-Process `"$SteamPath`" -ArgumentList `"$arguments`""
+        if ($SteamPath -like "steam://*") {
+            Write-Host "DRY RUN: Start-Process `"$SteamPath`""
+        } else {
+            Write-Host "DRY RUN: Start-Process `"$SteamPath`" -ArgumentList `"$arguments`""
+        }
         return
     }
 
-    Start-Process $SteamPath -ArgumentList $arguments
+    if ($SteamPath -like "steam://*") {
+        Start-Process $SteamPath
+    } else {
+        Start-Process $SteamPath -ArgumentList $arguments
+    }
     Start-Sleep -Seconds ([int]$Config.launchWaitSeconds)
 
     if ($Config.uiAutomation -and $Config.uiAutomation.enabled -ne $false) {
@@ -526,7 +561,7 @@ if ($configuredServers.Count -eq 0) {
     exit 0
 }
 
-$steamPath = if ($DryRun) { "steam.exe" } else { Get-SteamPath }
+$steamPath = if ($DryRun) { "steam.exe" } else { Get-SteamPath -AppId ([int]$config.steamAppId) }
 $playerProfile = Get-PlayerProfile -Config $config
 $steamName = $playerProfile.playerName
 
