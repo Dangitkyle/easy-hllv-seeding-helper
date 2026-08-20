@@ -266,7 +266,7 @@ function Show-SeedingDashboard {
     )
 
     Clear-Host
-    Write-Host "EASY HLLV Seeding Helper v1.0.2"
+    Write-Host "EASY HLLV Seeding Helper v1.1.1"
     Write-Host ""
     Write-Host "Player: $PlayerName"
     Write-Host "Status: $Message"
@@ -314,6 +314,52 @@ function Get-ServerNumber {
     }
 
     return $Server.name
+}
+
+function Get-ServerStatuses {
+    param(
+        [object]$Config,
+        [object[]]$Servers,
+        [switch]$LogResults
+    )
+
+    $statuses = @()
+    for ($index = 0; $index -lt $Servers.Count; $index++) {
+        $server = $Servers[$index]
+        $serverNumber = Get-ServerNumber -Server $server
+
+        try {
+            $players = Get-PlayerCount -Server $server
+        } catch {
+            if ($LogResults) {
+                Write-Log "Could not read population for server #$serverNumber ($($server.name)): $($_.Exception.Message)"
+            }
+            continue
+        }
+
+        $isUnderSeedThreshold = $players -lt [int]$Config.seedBelowPlayers
+        $isActiveSeed = $players -gt [int]$Config.activeSeedPlayers -and $isUnderSeedThreshold
+        if ($LogResults) {
+            if ($isActiveSeed) {
+                Write-Log "Server #$serverNumber is $players/$($Config.maxPlayers) - active seed."
+            } elseif ($isUnderSeedThreshold) {
+                Write-Log "Server #$serverNumber is $players/$($Config.maxPlayers) - under 50, available by server order."
+            } else {
+                Write-Log "Server #$serverNumber is $players/$($Config.maxPlayers) - not seeding right now."
+            }
+        }
+
+        $statuses += [pscustomobject]@{
+            Server = $server
+            ServerNumber = $serverNumber
+            Players = $players
+            Order = $index
+            IsUnderSeedThreshold = $isUnderSeedThreshold
+            IsActiveSeed = $isActiveSeed
+        }
+    }
+
+    return @($statuses)
 }
 
 function New-DefaultConfig {
@@ -644,37 +690,7 @@ Show-SeedingDashboard -PlayerName $steamName -Message "Starting server checks...
 do {
     Stop-Game -Config $config
 
-    $serverStatuses = @()
-    for ($index = 0; $index -lt $configuredServers.Count; $index++) {
-        $server = $configuredServers[$index]
-        $serverNumber = Get-ServerNumber -Server $server
-
-        try {
-            $players = Get-PlayerCount -Server $server
-        } catch {
-            Write-Log "Could not read population for server #$serverNumber ($($server.name)): $($_.Exception.Message)"
-            continue
-        }
-
-        $isUnderSeedThreshold = $players -lt [int]$config.seedBelowPlayers
-        $isActiveSeed = $players -gt [int]$config.activeSeedPlayers -and $isUnderSeedThreshold
-        if ($isActiveSeed) {
-            Write-Log "Server #$serverNumber is $players/$($config.maxPlayers) - active seed."
-        } elseif ($isUnderSeedThreshold) {
-            Write-Log "Server #$serverNumber is $players/$($config.maxPlayers) - under 50, available by server order."
-        } else {
-            Write-Log "Server #$serverNumber is $players/$($config.maxPlayers) - not seeding right now."
-        }
-
-        $serverStatuses += [pscustomobject]@{
-            Server = $server
-            ServerNumber = $serverNumber
-            Players = $players
-            Order = $index
-            IsUnderSeedThreshold = $isUnderSeedThreshold
-            IsActiveSeed = $isActiveSeed
-        }
-    }
+    $serverStatuses = @(Get-ServerStatuses -Config $config -Servers $configuredServers -LogResults)
 
     Show-SeedingDashboard -PlayerName $steamName -ServerStatuses $serverStatuses -Message "Finished checking all servers."
 
@@ -708,8 +724,18 @@ do {
     $restartScan = $false
     do {
         $serverNumber = Get-ServerNumber -Server $server
+        $latestServerStatuses = @(Get-ServerStatuses -Config $config -Servers $configuredServers)
+        if ($latestServerStatuses.Count -gt 0) {
+            $serverStatuses = $latestServerStatuses
+        }
+
         Wait-WithDashboardCountdown -Seconds ([int]$config.pollSeconds) -PlayerName $steamName -ServerStatuses $serverStatuses -Message "You are seeding server #$serverNumber."
         try {
+            $latestServerStatuses = @(Get-ServerStatuses -Config $config -Servers $configuredServers)
+            if ($latestServerStatuses.Count -gt 0) {
+                $serverStatuses = $latestServerStatuses
+            }
+
             $players = Get-PlayerCount -Server $server
             $connected = Test-PlayerConnected -Server $server -PlayerProfile $playerProfile
         } catch {
@@ -725,13 +751,6 @@ do {
         } else {
             $serverNumber = Get-ServerNumber -Server $server
             Write-Log "You are seeding server #$serverNumber. Population is $players/$($config.maxPlayers)."
-            foreach ($status in $serverStatuses) {
-                if ($status.ServerNumber -eq $serverNumber) {
-                    $status.Players = $players
-                    $status.IsUnderSeedThreshold = $players -lt [int]$config.seedBelowPlayers
-                    $status.IsActiveSeed = $players -gt [int]$config.activeSeedPlayers -and $status.IsUnderSeedThreshold
-                }
-            }
             Show-SeedingDashboard -PlayerName $steamName -ServerStatuses $serverStatuses -Message "You are seeding server #$serverNumber. Population is $players/$($config.maxPlayers)."
         }
     } until ($restartScan -or $players -gt [int]$config.seededAtPlayers)

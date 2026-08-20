@@ -1,4 +1,4 @@
-# EASY HLLV Seeding Helper v1.1.0
+# EASY HLLV Seeding Helper v1.1.1
 
 ## How To Use
 

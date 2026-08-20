@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.1.1
+
+- Fixes stale dashboard server counts while actively seeding.
+- Refreshes all server rows before each countdown and each seeding status check.
+- Fixes the dashboard version label.
+
 ## v1.1.0
 
 - Adds a clean live status dashboard in the PowerShell window.
