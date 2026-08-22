@@ -63,6 +63,13 @@
                         "battleMetricsId":  "",
                         "searchText":  "EASY Company #4",
                         "enabled":  true
+                    },
+                    {
+                        "name":  "EASY Company #5 | NA EAST | WARFARE | DISCORD.GG/EASYCOMPANY | QONZER",
+                        "easyStatsUrl":  "https://stats1.easyhll.com",
+                        "battleMetricsId":  "",
+                        "searchText":  "EASY Company #5",
+                        "enabled":  true
                     }
                 ]
 }

@@ -281,6 +281,7 @@ function Show-SeedingDashboard {
         Write-Host "Server #2: waiting for check"
         Write-Host "Server #3: waiting for check"
         Write-Host "Server #4: waiting for check"
+        Write-Host "Server #5: waiting for check"
     }
 
     Write-Host ""
