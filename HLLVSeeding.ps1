@@ -266,7 +266,7 @@ function Show-SeedingDashboard {
     )
 
     Clear-Host
-    Write-Host "EASY HLLV Seeding Helper v1.1.1"
+    Write-Host "EASY HLLV Seeding Helper v1.1.2"
     Write-Host ""
     Write-Host "Player: $PlayerName"
     Write-Host "Status: $Message"

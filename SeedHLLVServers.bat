@@ -1,7 +1,7 @@
 @echo off
-title EASY HLLV Seeding Helper v1.1.1
+title EASY HLLV Seeding Helper v1.1.2
 cd /d %~dp0
-echo EASY HLLV Seeding Helper v1.1.1
+echo EASY HLLV Seeding Helper v1.1.2
 echo.
 echo First run will ask for your Steam name letter-for-letter.
 echo Keep this window open while seeding.
