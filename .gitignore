@@ -1,4 +1,7 @@
 log.txt
 player-profile.json
 name.txt
+seeder-status.json
+.*.tmp
+.*.bak
 *.zip

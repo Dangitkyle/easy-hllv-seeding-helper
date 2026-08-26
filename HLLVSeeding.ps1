@@ -1,20 +1,207 @@
 ##############################################################
-# Hell Let Loose: Vietnam seeding helper
-# Recreated from the EASY HLL seeding workflow, but made
-# configurable for HLLV community servers.
+# EASY Hell Let Loose seeding helper
+# Seeds HLLV first, then HLL WW2 when its HLLV work is complete.
 ##############################################################
 param (
     [string]$ConfigPath = "$PSScriptRoot\servers.json",
     [string]$BasePath = $PSScriptRoot,
     [switch]$Once,
     [switch]$DryRun,
-    [switch]$Setup
+    [switch]$Setup,
+    [switch]$UiMode
 )
 
 $ErrorActionPreference = "Stop"
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
-Start-Transcript -Path "$BasePath\log.txt" -Append | Out-Null
+
+$script:StatusFilePath = Join-Path $BasePath "seeder-status.json"
+$script:LogPath = Join-Path $BasePath "log.txt"
+$script:LogRetentionHours = 24
+$script:NextLogRetentionAt = Get-Date
+$script:TranscriptRunning = $false
+$script:StatusPlayerName = ""
+$script:StatusServerStatuses = @()
+$script:StatusMessage = "Starting seeder..."
+$script:StatusNextCheckSeconds = -1
+$script:LastLogMessage = "Starting seeder..."
+$script:RecentStatusEvents = @()
+
+function Write-JsonFileSafely {
+    param(
+        [Parameter(Mandatory = $true)]$Value,
+        [Parameter(Mandatory = $true)][string]$Path,
+        [int]$Depth = 12,
+        [int]$Attempts = 5
+    )
+
+    $directory = Split-Path -Parent $Path
+    $fileName = [System.IO.Path]::GetFileName($Path)
+    $temporaryPath = Join-Path $directory (".{0}.{1}.tmp" -f $fileName, [Guid]::NewGuid().ToString("N"))
+    $backupPath = Join-Path $directory (".{0}.{1}.bak" -f $fileName, [Guid]::NewGuid().ToString("N"))
+    $lastError = $null
+
+    try {
+        $json = $Value | ConvertTo-Json -Depth $Depth
+        [System.IO.File]::WriteAllText($temporaryPath, $json, [System.Text.UTF8Encoding]::new($false))
+
+        for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
+            try {
+                if ([System.IO.File]::Exists($Path)) {
+                    [System.IO.File]::Replace($temporaryPath, $Path, $backupPath)
+                } else {
+                    [System.IO.File]::Move($temporaryPath, $Path)
+                }
+                return
+            } catch {
+                $lastError = $_.Exception
+                if ($attempt -lt $Attempts) {
+                    Start-Sleep -Milliseconds (100 * $attempt)
+                }
+            }
+        }
+
+        throw $lastError
+    } finally {
+        if ([System.IO.File]::Exists($temporaryPath)) {
+            try { [System.IO.File]::Delete($temporaryPath) } catch { }
+        }
+        if ([System.IO.File]::Exists($backupPath)) {
+            try { [System.IO.File]::Delete($backupPath) } catch { }
+        }
+    }
+}
+
+function Write-LogLinesSafely {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][AllowEmptyString()][string[]]$Lines,
+        [int]$Attempts = 5
+    )
+
+    $directory = Split-Path -Parent $Path
+    $fileName = [System.IO.Path]::GetFileName($Path)
+    $temporaryPath = Join-Path $directory (".{0}.{1}.tmp" -f $fileName, [Guid]::NewGuid().ToString("N"))
+    $backupPath = Join-Path $directory (".{0}.{1}.bak" -f $fileName, [Guid]::NewGuid().ToString("N"))
+    $lastError = $null
+
+    try {
+        [System.IO.File]::WriteAllLines($temporaryPath, $Lines, [System.Text.UTF8Encoding]::new($false))
+        for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
+            try {
+                if ([System.IO.File]::Exists($Path)) {
+                    [System.IO.File]::Replace($temporaryPath, $Path, $backupPath)
+                } else {
+                    [System.IO.File]::Move($temporaryPath, $Path)
+                }
+                return
+            } catch {
+                $lastError = $_.Exception
+                if ($attempt -lt $Attempts) {
+                    Start-Sleep -Milliseconds (100 * $attempt)
+                }
+            }
+        }
+        throw $lastError
+    } finally {
+        if ([System.IO.File]::Exists($temporaryPath)) {
+            try { [System.IO.File]::Delete($temporaryPath) } catch { }
+        }
+        if ([System.IO.File]::Exists($backupPath)) {
+            try { [System.IO.File]::Delete($backupPath) } catch { }
+        }
+    }
+}
+
+function Start-SeederTranscript {
+    try {
+        Start-Transcript -Path $script:LogPath -Append -ErrorAction Stop | Out-Null
+        $script:TranscriptRunning = $true
+    } catch {
+        $script:TranscriptRunning = $false
+    }
+}
+
+function Stop-SeederTranscript {
+    if (!$script:TranscriptRunning) {
+        return
+    }
+
+    try { Stop-Transcript -ErrorAction Stop | Out-Null } catch { }
+    $script:TranscriptRunning = $false
+}
+
+function Invoke-LogRetention {
+    param([switch]$Force)
+
+    $now = Get-Date
+    if (!$Force -and $now -lt $script:NextLogRetentionAt) {
+        return
+    }
+    $script:NextLogRetentionAt = $now.AddHours(1)
+
+    $resumeTranscript = $script:TranscriptRunning
+    if ($resumeTranscript) {
+        Stop-SeederTranscript
+    }
+
+    try {
+        if (![System.IO.File]::Exists($script:LogPath)) {
+            return
+        }
+
+        $cutoff = $now.AddHours(-1 * $script:LogRetentionHours)
+        $lines = [System.IO.File]::ReadAllLines($script:LogPath)
+        $keepFromIndex = -1
+
+        for ($index = 0; $index -lt $lines.Count; $index++) {
+            $line = $lines[$index]
+            $entryTime = [DateTime]::MinValue
+
+            if ($line -match '^Start time: (?<stamp>\d{14})$') {
+                $hasEntryTime = [DateTime]::TryParseExact(
+                    $Matches.stamp,
+                    'yyyyMMddHHmmss',
+                    [System.Globalization.CultureInfo]::InvariantCulture,
+                    [System.Globalization.DateTimeStyles]::AssumeLocal,
+                    [ref]$entryTime
+                )
+                if ($hasEntryTime -and $entryTime -ge $cutoff) {
+                    $keepFromIndex = [Math]::Max(0, $index - 2)
+                    break
+                }
+            } elseif ($line -match '^\[(?<stamp>\d{2}/\d{2}/\d{4} \d{2}:\d{2}:\d{2})\]') {
+                $hasEntryTime = [DateTime]::TryParseExact(
+                    $Matches.stamp,
+                    'MM/dd/yyyy HH:mm:ss',
+                    [System.Globalization.CultureInfo]::InvariantCulture,
+                    [System.Globalization.DateTimeStyles]::AssumeLocal,
+                    [ref]$entryTime
+                )
+                if ($hasEntryTime -and $entryTime -ge $cutoff) {
+                    $keepFromIndex = $index
+                    break
+                }
+            }
+        }
+
+        if ($keepFromIndex -ge 0) {
+            $retainedLines = if ($keepFromIndex -eq 0) { $lines } else { @($lines[$keepFromIndex..($lines.Count - 1)]) }
+            Write-LogLinesSafely -Path $script:LogPath -Lines $retainedLines
+        } elseif ([System.IO.File]::GetLastWriteTime($script:LogPath) -lt $cutoff) {
+            Write-LogLinesSafely -Path $script:LogPath -Lines @()
+        }
+    } catch {
+        # Log cleanup must never interrupt seeding.
+    } finally {
+        if ($resumeTranscript) {
+            Start-SeederTranscript
+        }
+    }
+}
+
+Invoke-LogRetention -Force
+Start-SeederTranscript
 
 $ClickerSource = @'
 using System;
@@ -72,7 +259,7 @@ function Set-GameForeground {
 
     $process = Get-GameProcesses -Config $Config | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1
     if (!$process) {
-        Write-Log "HLLV window was not found for UI automation."
+        Write-Log "$($Config.displayName) window was not found for UI automation."
         return $false
     }
 
@@ -176,15 +363,17 @@ function Invoke-GameClick {
 
     $point = Convert-UiPointToScreenPoint -Config $Config -X $X -Y $Y
     if ($point.AutoDetected -and $point.Bounds) {
-        Write-Log "Auto-detected HLLV display/window $($point.Bounds.Width)x$($point.Bounds.Height) at $($point.Bounds.Left),$($point.Bounds.Top). Clicking $Name at $($point.X),$($point.Y)."
+        Write-Log "Auto-detected $($Config.displayName) display/window $($point.Bounds.Width)x$($point.Bounds.Height) at $($point.Bounds.Left),$($point.Bounds.Top). Clicking $Name at $($point.X),$($point.Y)."
     } else {
-        Write-Log "Could not auto-detect HLLV display/window. Clicking $Name at configured screen point $X,$Y."
+        Write-Log "Could not auto-detect $($Config.displayName) display/window. Clicking $Name at configured screen point $X,$Y."
     }
 
     Invoke-LeftClick -X $point.X -Y $point.Y
 }
 
 $DefaultConfig = [ordered]@{
+    version = "2.3.4"
+    enabledGames = [ordered]@{ hllv = $true; hllWw2 = $true }
     steamAppId = 3079210
     playerProfileFile = "player-profile.json"
     playerNameFile = "name.txt"
@@ -196,6 +385,7 @@ $DefaultConfig = [ordered]@{
     postClickWaitSeconds = 120
     pollSeconds = 60
     reconnectWaitSeconds = 120
+    connectionMissesBeforeRestart = 3
     closeGraceSeconds = 30
     uiAutomation = [ordered]@{
         enabled = $true
@@ -205,6 +395,7 @@ $DefaultConfig = [ordered]@{
         focusY = 500
         enlistX = 135
         enlistY = 681
+        enlistClickCount = 2
         searchX = 1605
         searchY = 150
         joinX = 1295
@@ -219,8 +410,7 @@ $DefaultConfig = [ordered]@{
         "HLLVietnam-Win64-Shipping",
         "HLLV-Win64-Shipping",
         "HellLetLooseVietnam-Win64-Shipping",
-        "HellLetLooseVietnam",
-        "HLL-Win64-Shipping"
+        "HellLetLooseVietnam"
     )
     servers = @(
         [ordered]@{
@@ -233,9 +423,116 @@ $DefaultConfig = [ordered]@{
     )
 }
 
+$DefaultWw2Config = [ordered]@{
+    displayName = "HLL WW2"
+    steamAppId = 686810
+    seedBelowPlayers = 50
+    activeSeedPlayers = 3
+    seededAtPlayers = 50
+    maxPlayers = 100
+    launchWaitSeconds = 45
+    postClickWaitSeconds = 60
+    pollSeconds = 60
+    reconnectWaitSeconds = 60
+    connectionMissesBeforeRestart = 3
+    closeGraceSeconds = 30
+    uiAutomation = [ordered]@{
+        enabled = $true
+        referenceWidth = 1920
+        referenceHeight = 1080
+        focusX = 500
+        focusY = 500
+        enlistX = 120
+        enlistY = 580
+        enlistClickCount = 1
+        searchX = 1000
+        searchY = 199
+        joinX = 1480
+        joinY = 390
+        menuReadyWaitSeconds = 10
+        afterFocusClickWaitSeconds = 15
+        browserWaitSeconds = 10
+        searchWaitSeconds = 8
+        joinWaitSeconds = 45
+    }
+    gameProcessNames = @("HLL-Win64-Shipping", "Launch_HLL")
+    servers = @(
+        [ordered]@{
+            number = "WW2"
+            name = "EASY Company | New Players Welcome | DISCORD.GG/EASYCOMPANY | QONZER"
+            easyStatsUrl = "https://stats6.easyhll.com"
+            battleMetricsId = ""
+            searchText = "EASY Company | New Players Welcome"
+            enabled = $true
+        }
+    )
+}
+
+function Publish-SeederStatus {
+    param([bool]$Running = $true)
+
+    $serverRows = @()
+    foreach ($status in @($script:StatusServerStatuses)) {
+        if (!$status) {
+            continue
+        }
+
+        $state = if (!$status.GameEnabled) {
+            "DISABLED"
+        } elseif ($status.IsAvailable -eq $false) {
+            "DOWN"
+        } elseif ($status.IsActiveSeed) {
+            "ACTIVE SEED"
+        } elseif ($status.IsUnderSeedThreshold) {
+            "UNDER 50"
+        } else {
+            "NOT SEEDING"
+        }
+
+        $serverRows += [ordered]@{
+            key = "$($status.GameId):$($status.ServerNumber)"
+            gameId = "$($status.GameId)"
+            gameName = "$($status.GameName)"
+            number = "$($status.ServerNumber)"
+            players = if ($status.IsAvailable -eq $false) { -1 } else { [int]$status.Players }
+            maxPlayers = [int]$status.MaxPlayers
+            state = $state
+        }
+    }
+
+    $payload = [ordered]@{
+        version = "2.3.4"
+        running = $Running
+        playerName = $script:StatusPlayerName
+        message = $script:StatusMessage
+        lastLog = $script:LastLogMessage
+        nextCheckSeconds = $script:StatusNextCheckSeconds
+        updatedAt = (Get-Date).ToString("o")
+        servers = $serverRows
+        events = @($script:RecentStatusEvents)
+    }
+
+    try {
+        Write-JsonFileSafely -Value $payload -Path $script:StatusFilePath -Depth 6
+    } catch {
+        # A status-file failure must never interrupt the seeding loop.
+    }
+}
+
 function Write-Log {
     param([string]$Message)
+    Invoke-LogRetention
     $time = Get-Date
+    $script:LastLogMessage = $Message
+    $script:StatusMessage = $Message
+    $script:RecentStatusEvents += [ordered]@{
+        timestamp = $time.ToString("o")
+        message = $Message
+    }
+    if ($script:RecentStatusEvents.Count -gt 40) {
+        $script:RecentStatusEvents = @($script:RecentStatusEvents | Select-Object -Last 40)
+    }
+    Publish-SeederStatus
     Write-Host "[$time] $Message"
 }
 
@@ -246,7 +543,11 @@ function Format-ServerStatusLine {
         return ""
     }
 
-    $statusText = if ($Status.IsActiveSeed) {
+    $statusText = if (!$Status.GameEnabled) {
+        "DISABLED"
+    } elseif ($Status.IsAvailable -eq $false) {
+        "DOWN"
+    } elseif ($Status.IsActiveSeed) {
         "ACTIVE SEED"
     } elseif ($Status.IsUnderSeedThreshold) {
         "UNDER 50"
@@ -254,7 +555,8 @@ function Format-ServerStatusLine {
         "NOT SEEDING"
     }
 
-    "Server #$($Status.ServerNumber): $($Status.Players)/100 - $statusText"
+    $populationText = if ($Status.IsAvailable -eq $false) { "--/$($Status.MaxPlayers)" } else { "$($Status.Players)/$($Status.MaxPlayers)" }
+    "$($Status.GameName) $($Status.ServerNumber): $populationText - $statusText"
 }
 
 function Show-SeedingDashboard {
@@ -265,23 +567,29 @@ function Show-SeedingDashboard {
         [int]$NextCheckSeconds = -1
     )
 
+    $script:StatusPlayerName = $PlayerName
+    $script:StatusServerStatuses = @($ServerStatuses)
+    $script:StatusMessage = $Message
+    $script:StatusNextCheckSeconds = $NextCheckSeconds
+    Publish-SeederStatus
+
+    if ($UiMode) {
+        return
+    }
+
     Clear-Host
-    Write-Host "EASY HLLV Seeding Helper v1.1.2"
+    Write-Host "EASY Seeding Helper v2.3.4"
     Write-Host ""
     Write-Host "Player: $PlayerName"
     Write-Host "Status: $Message"
     Write-Host ""
 
     if ($ServerStatuses.Count -gt 0) {
-        foreach ($status in ($ServerStatuses | Sort-Object @{ Expression = "Order"; Descending = $false })) {
+        foreach ($status in ($ServerStatuses | Sort-Object @{ Expression = "GamePriority"; Descending = $false }, @{ Expression = "Order"; Descending = $false })) {
             Write-Host (Format-ServerStatusLine -Status $status)
         }
     } else {
-        Write-Host "Server #1: waiting for check"
-        Write-Host "Server #2: waiting for check"
-        Write-Host "Server #3: waiting for check"
-        Write-Host "Server #4: waiting for check"
-        Write-Host "Server #5: waiting for check"
+        Write-Host "HLLV and HLL WW2 servers: waiting for check"
     }
 
     Write-Host ""
@@ -309,6 +617,10 @@ function Wait-WithDashboardCountdown {
 function Get-ServerNumber {
     param([object]$Server)
 
+    if (![string]::IsNullOrWhiteSpace("$($Server.number)")) {
+        return "$($Server.number)"
+    }
+
     $label = "$($Server.searchText) $($Server.name)"
     if ($label -match "#(\d+)") {
         return $Matches[1]
@@ -321,6 +633,7 @@ function Get-ServerStatuses {
     param(
         [object]$Config,
         [object[]]$Servers,
+        [int]$GamePriority = 0,
         [switch]$LogResults
     )
 
@@ -333,7 +646,23 @@ function Get-ServerStatuses {
             $players = Get-PlayerCount -Server $server
         } catch {
             if ($LogResults) {
-                Write-Log "Could not read population for server #$serverNumber ($($server.name)): $($_.Exception.Message)"
+                Write-Log "$($Config.displayName) server $serverNumber is DOWN because its stats page is unavailable. Skipping it until the next check."
+            }
+
+            $statuses += [pscustomobject]@{
+                Game = $Config
+                GameId = "$($Config.gameId)"
+                GameName = "$($Config.displayName)"
+                GameEnabled = [bool]$Config.gameEnabled
+                GamePriority = $GamePriority
+                Server = $server
+                ServerNumber = $serverNumber
+                Players = 0
+                MaxPlayers = [int]$Config.maxPlayers
+                Order = $index
+                IsAvailable = $false
+                IsUnderSeedThreshold = $false
+                IsActiveSeed = $false
             }
             continue
         }
@@ -341,20 +670,29 @@ function Get-ServerStatuses {
         $isUnderSeedThreshold = $players -lt [int]$Config.seedBelowPlayers
         $isActiveSeed = $players -gt [int]$Config.activeSeedPlayers -and $isUnderSeedThreshold
         if ($LogResults) {
-            if ($isActiveSeed) {
-                Write-Log "Server #$serverNumber is $players/$($Config.maxPlayers) - active seed."
+            if (!$Config.gameEnabled) {
+                Write-Log "$($Config.displayName) server $serverNumber is $players/$($Config.maxPlayers) - disabled."
+            } elseif ($isActiveSeed) {
+                Write-Log "$($Config.displayName) server $serverNumber is $players/$($Config.maxPlayers) - active seed."
             } elseif ($isUnderSeedThreshold) {
-                Write-Log "Server #$serverNumber is $players/$($Config.maxPlayers) - under 50, available by server order."
+                Write-Log "$($Config.displayName) server $serverNumber is $players/$($Config.maxPlayers) - under 50, available by server order."
             } else {
-                Write-Log "Server #$serverNumber is $players/$($Config.maxPlayers) - not seeding right now."
+                Write-Log "$($Config.displayName) server $serverNumber is $players/$($Config.maxPlayers) - not seeding right now."
             }
         }
 
         $statuses += [pscustomobject]@{
+            Game = $Config
+            GameId = "$($Config.gameId)"
+            GameName = "$($Config.displayName)"
+            GameEnabled = [bool]$Config.gameEnabled
+            GamePriority = $GamePriority
             Server = $server
             ServerNumber = $serverNumber
             Players = $players
+            MaxPlayers = [int]$Config.maxPlayers
             Order = $index
+            IsAvailable = $true
             IsUnderSeedThreshold = $isUnderSeedThreshold
             IsActiveSeed = $isActiveSeed
         }
@@ -376,14 +714,105 @@ function Get-Config {
     }
 
     $config = Get-Content -Path $ConfigPath -Raw | ConvertFrom-Json
+    if (!$config.version) { $config | Add-Member -NotePropertyName version -NotePropertyValue "2.3.4" }
+    if (!$config.enabledGames) {
+        $config | Add-Member -NotePropertyName enabledGames -NotePropertyValue ([pscustomobject]@{ hllv = $true; hllWw2 = $true })
+    }
     if (!$config.steamAppId) { $config | Add-Member -NotePropertyName steamAppId -NotePropertyValue 3079210 }
     if (!$config.playerProfileFile) { $config | Add-Member -NotePropertyName playerProfileFile -NotePropertyValue "player-profile.json" }
     if (!$config.activeSeedPlayers) { $config | Add-Member -NotePropertyName activeSeedPlayers -NotePropertyValue 3 }
     if (!$config.gameProcessNames) { $config | Add-Member -NotePropertyName gameProcessNames -NotePropertyValue $DefaultConfig.gameProcessNames }
+    if (!$config.hllWw2) { $config | Add-Member -NotePropertyName hllWw2 -NotePropertyValue ([pscustomobject]$DefaultWw2Config) }
     if (!$config.servers -or $config.servers.Count -eq 0) {
         throw "No servers are configured. Add at least one server to $ConfigPath."
     }
     return $config
+}
+
+function Get-GameConfigurations {
+    param([object]$Config)
+
+    $sharedProperties = @("seedBelowPlayers", "activeSeedPlayers", "seededAtPlayers", "maxPlayers", "pollSeconds", "reconnectWaitSeconds", "connectionMissesBeforeRestart", "closeGraceSeconds")
+    if (!$Config.gameId) { $Config | Add-Member -NotePropertyName gameId -NotePropertyValue "hllv" -Force }
+    if (!$Config.displayName) { $Config | Add-Member -NotePropertyName displayName -NotePropertyValue "HLLV" -Force }
+    $Config | Add-Member -NotePropertyName gameEnabled -NotePropertyValue ([bool]$Config.enabledGames.hllv) -Force
+
+    $ww2 = $Config.hllWw2
+    if (!$ww2.gameId) { $ww2 | Add-Member -NotePropertyName gameId -NotePropertyValue "hllWw2" -Force }
+    if (!$ww2.displayName) { $ww2 | Add-Member -NotePropertyName displayName -NotePropertyValue "HLL WW2" -Force }
+    $ww2 | Add-Member -NotePropertyName gameEnabled -NotePropertyValue ([bool]$Config.enabledGames.hllWw2) -Force
+    foreach ($property in $sharedProperties) {
+        if ($null -eq $ww2.$property) {
+            $ww2 | Add-Member -NotePropertyName $property -NotePropertyValue $Config.$property -Force
+        }
+    }
+
+    return @($Config, $ww2)
+}
+
+function Get-AllServerStatuses {
+    param(
+        [object[]]$Games,
+        [switch]$LogResults
+    )
+
+    $statuses = @()
+    for ($gameIndex = 0; $gameIndex -lt $Games.Count; $gameIndex++) {
+        $game = $Games[$gameIndex]
+        $servers = @($game.servers | Where-Object { $_.enabled -ne $false })
+        if ($servers.Count -eq 0) {
+            continue
+        }
+
+        $statuses += @(Get-ServerStatuses -Config $game -Servers $servers -GamePriority $gameIndex -LogResults:$LogResults)
+    }
+    return @($statuses)
+}
+
+function Get-ServerStatusKey {
+    param([object]$Status)
+
+    "$($Status.GameId):$($Status.ServerNumber)"
+}
+
+function Get-PrioritySeedingTarget {
+    param(
+        [object[]]$Statuses,
+        [object[]]$Games,
+        [hashtable]$SkipUntil = @{},
+        [datetime]$Now = (Get-Date)
+    )
+
+    foreach ($key in @($SkipUntil.Keys)) {
+        if ($SkipUntil[$key] -le $Now) {
+            [void]$SkipUntil.Remove($key)
+        }
+    }
+
+    foreach ($game in @($Games)) {
+        $target = @($Statuses |
+            Where-Object {
+                $statusKey = Get-ServerStatusKey -Status $_
+                $_.GameId -eq $game.gameId -and
+                    $_.IsAvailable -ne $false -and
+                    $_.IsUnderSeedThreshold -and
+                    !$SkipUntil.ContainsKey($statusKey)
+            } |
+            Sort-Object @{ Expression = {
+                if ($_.GameId -eq "hllv" -and "$($_.ServerNumber)" -match '^\d+$') {
+                    [int]$_.ServerNumber
+                } else {
+                    [int]$_.Order
+                }
+            }; Descending = $false } |
+            Select-Object -First 1)
+
+        if ($target.Count -gt 0) {
+            return $target[0]
+        }
+    }
+
+    return
 }
 
 function Get-SteamPath {
@@ -440,11 +869,16 @@ function Get-GameProcesses {
 }
 
 function Stop-Game {
-    param([object]$Config)
+    param(
+        [object]$Config,
+        [switch]$QuietIfStopped
+    )
 
     $processes = @(Get-GameProcesses -Config $Config)
     if ($processes.Count -eq 0) {
-        Write-Log "Hell Let Loose: Vietnam is not currently running."
+        if (!$QuietIfStopped) {
+            Write-Log "$($Config.displayName) is not currently running."
+        }
         return
     }
 
@@ -478,6 +912,20 @@ function Invoke-EasyRestMethod {
         try {
             return Invoke-RestMethod -Uri $Uri
         } catch {
+            $statusCode = $null
+            try {
+                if ($_.Exception.Response -and $_.Exception.Response.StatusCode) {
+                    $statusCode = [int]$_.Exception.Response.StatusCode
+                }
+            } catch {
+            }
+
+            $isServerError = ($statusCode -ge 500 -and $statusCode -lt 600) -or
+                $_.Exception.Message -match '(?i)(?:\(|\b)5\d\d(?:\)|\b).*server error'
+            if ($isServerError) {
+                throw
+            }
+
             if ($attempt -ge $Retries) {
                 throw
             }
@@ -494,7 +942,14 @@ function Get-PlayerCount {
     if (![string]::IsNullOrWhiteSpace($Server.easyStatsUrl)) {
         $uri = "$($Server.easyStatsUrl.TrimEnd('/'))/api/get_public_info"
         $json = Invoke-EasyRestMethod -Uri $uri
-        return [int]$json.result.player_count
+        $players = 0
+        $playerCountValue = $json.result.player_count
+        if ($null -eq $playerCountValue -or
+            ![int]::TryParse("$playerCountValue", [ref]$players) -or
+            $players -lt 0) {
+            throw "The stats page returned no valid player count."
+        }
+        return $players
     }
 
     $uri = "https://api.battlemetrics.com/servers/$($Server.battleMetricsId)"
@@ -502,29 +957,57 @@ function Get-PlayerCount {
     return [int]$json.data.attributes.players
 }
 
-function Test-PlayerConnected {
+function ConvertTo-ComparablePlayerName {
+    param([string]$PlayerName)
+
+    if ([string]::IsNullOrWhiteSpace($PlayerName)) {
+        return ""
+    }
+
+    $normalized = $PlayerName.Normalize([Text.NormalizationForm]::FormKC)
+    $normalized = [Regex]::Replace($normalized, "\p{Cf}", "")
+    $normalized = [Regex]::Replace($normalized, "\s+", " ").Trim()
+    return $normalized.ToUpperInvariant()
+}
+
+function Get-PlayerConnectionState {
     param(
         [object]$Server,
         [object]$PlayerProfile
     )
 
-    $escapedPlayerName = [Regex]::Escape($PlayerProfile.playerName)
+    $expectedName = ConvertTo-ComparablePlayerName -PlayerName "$($PlayerProfile.playerName)"
 
     if (![string]::IsNullOrWhiteSpace($Server.easyStatsUrl)) {
         $uri = "$($Server.easyStatsUrl.TrimEnd('/'))/api/get_live_game_stats"
         $json = Invoke-EasyRestMethod -Uri $uri
-        foreach ($player in @($json.result.stats | Where-Object { $_.status -eq "online" })) {
-            if ($player.player -match $escapedPlayerName) {
-                return $true
-            }
-        }
+        $allPlayers = @($json.result.stats)
+        $onlinePlayers = @($allPlayers | Where-Object { "$($_.status)" -ieq "online" })
+        $matchingPlayers = @($allPlayers | Where-Object {
+            (ConvertTo-ComparablePlayerName -PlayerName "$($_.player)") -eq $expectedName
+        })
+        $matchingOnlinePlayers = @($matchingPlayers | Where-Object { "$($_.status)" -ieq "online" })
 
-        return $false
+        return [pscustomobject]@{
+            Connected = $matchingOnlinePlayers.Count -gt 0
+            MatchFound = $matchingPlayers.Count -gt 0
+            OnlinePlayerCount = $onlinePlayers.Count
+            MatchingStatuses = @($matchingPlayers | ForEach-Object { "$($_.status)" } | Sort-Object -Unique)
+            MatchingNames = @($matchingPlayers | ForEach-Object { "$($_.player)" } | Sort-Object -Unique)
+        }
     }
 
     $uri = "https://api.battlemetrics.com/servers/$($Server.battleMetricsId)`?include=identifier"
     $response = Invoke-WebRequest -Uri $uri
-    return ($response.Content -match $escapedPlayerName)
+    $escapedPlayerName = [Regex]::Escape("$($PlayerProfile.playerName)")
+    $connected = $response.Content -match $escapedPlayerName
+    return [pscustomobject]@{
+        Connected = $connected
+        MatchFound = $connected
+        OnlinePlayerCount = if ($connected) { 1 } else { 0 }
+        MatchingStatuses = @()
+        MatchingNames = @()
+    }
 }
 
 function Start-Server {
@@ -535,7 +1018,7 @@ function Start-Server {
     )
 
     $arguments = "-applaunch $($Config.steamAppId)"
-    Write-Log "Launching $($Server.name) with Steam App ID $($Config.steamAppId)."
+    Write-Log "Launching $($Config.displayName) for $($Server.name) with Steam App ID $($Config.steamAppId)."
 
     if ($DryRun) {
         if ($SteamPath -like "steam://*") {
@@ -555,7 +1038,7 @@ function Start-Server {
 
     if ($Config.uiAutomation -and $Config.uiAutomation.enabled -ne $false) {
         $searchText = if (![string]::IsNullOrWhiteSpace($Server.searchText)) { $Server.searchText } else { $Server.name }
-        Write-Log "Using HLLV server browser UI to join $searchText."
+        Write-Log "Using the $($Config.displayName) server browser to join $searchText."
 
         if ($Config.uiAutomation.menuReadyWaitSeconds) {
             Write-Log "Waiting $($Config.uiAutomation.menuReadyWaitSeconds) seconds for the main menu to become clickable."
@@ -570,11 +1053,14 @@ function Start-Server {
         } else {
             Start-Sleep -Milliseconds 500
         }
-        Set-GameForeground -Config $Config | Out-Null
-        Invoke-GameClick -Config $Config -X ([int]$Config.uiAutomation.enlistX) -Y ([int]$Config.uiAutomation.enlistY) -Name "Enlist"
-        Start-Sleep -Milliseconds 900
-        Set-GameForeground -Config $Config | Out-Null
-        Invoke-GameClick -Config $Config -X ([int]$Config.uiAutomation.enlistX) -Y ([int]$Config.uiAutomation.enlistY) -Name "Enlist"
+        $enlistClickCount = if ($Config.uiAutomation.enlistClickCount) { [int]$Config.uiAutomation.enlistClickCount } else { 2 }
+        for ($click = 1; $click -le $enlistClickCount; $click++) {
+            Set-GameForeground -Config $Config | Out-Null
+            Invoke-GameClick -Config $Config -X ([int]$Config.uiAutomation.enlistX) -Y ([int]$Config.uiAutomation.enlistY) -Name "Enlist"
+            if ($click -lt $enlistClickCount) {
+                Start-Sleep -Milliseconds 900
+            }
+        }
         Start-Sleep -Seconds ([int]$Config.uiAutomation.browserWaitSeconds)
 
         Set-GameForeground -Config $Config | Out-Null
@@ -587,7 +1073,7 @@ function Start-Server {
         Start-Sleep -Seconds ([int]$Config.uiAutomation.searchWaitSeconds)
 
         $serverNumber = Get-ServerNumber -Server $Server
-        Write-Log "Joining server #$serverNumber now."
+        Write-Log "Joining $($Config.displayName) server $serverNumber now."
         Invoke-GameClick -Config $Config -X ([int]$Config.uiAutomation.joinX) -Y ([int]$Config.uiAutomation.joinY) -Name "Join"
         Start-Sleep -Seconds ([int]$Config.uiAutomation.joinWaitSeconds)
         return
@@ -636,11 +1122,11 @@ function Get-PlayerProfile {
     }
 
     Write-Host ""
-    Write-Host "First-time EASY HLLV seeding setup"
+    Write-Host "First-time EASY seeding setup"
     Write-Host "This saves your personal player info on this PC only."
     Write-Host ""
 
-    $playerName = Read-RequiredValue -Prompt "Enter your Steam name letter-for-letter exactly as it appears in HLLV stats"
+    $playerName = Read-RequiredValue -Prompt "Enter your Steam name letter-for-letter exactly as it appears in EASY stats"
 
     $profile = [ordered]@{
         playerName = $playerName
@@ -655,113 +1141,173 @@ function Get-PlayerProfile {
 }
 
 $config = Get-Config
-$enabledServers = @($config.servers | Where-Object { $_.enabled -ne $false })
-if ($enabledServers.Count -eq 0) {
-    Write-Host "No servers are enabled in $ConfigPath."
-    Write-Host "Set enabled to true for at least one configured server."
-    Stop-Transcript | Out-Null
+$allGames = @(Get-GameConfigurations -Config $config)
+$enabledGames = @($allGames | Where-Object { $_.gameEnabled })
+if ($enabledGames.Count -eq 0) {
+    Write-Host "No games are enabled. Select HLLV, HLL WW2, or both in the helper."
+    Stop-SeederTranscript
     exit 0
 }
 
-$configuredServers = @($enabledServers | Where-Object {
-    (
-        (![string]::IsNullOrWhiteSpace($_.easyStatsUrl) -and $_.easyStatsUrl -notmatch "^REPLACE_WITH_") -or
-        (![string]::IsNullOrWhiteSpace($_.battleMetricsId) -and $_.battleMetricsId -notmatch "^REPLACE_WITH_")
-    )
-})
-if ($configuredServers.Count -eq 0) {
-    Write-Host "Enabled servers still have placeholder values in $ConfigPath."
-    Write-Host "Replace easyStatsUrl or battleMetricsId before running the seeding loop."
-    Stop-Transcript | Out-Null
-    exit 0
+foreach ($game in $enabledGames) {
+    $configuredServers = @($game.servers | Where-Object {
+        $_.enabled -ne $false -and (
+            (![string]::IsNullOrWhiteSpace($_.easyStatsUrl) -and $_.easyStatsUrl -notmatch "^REPLACE_WITH_") -or
+            (![string]::IsNullOrWhiteSpace($_.battleMetricsId) -and $_.battleMetricsId -notmatch "^REPLACE_WITH_")
+        )
+    })
+    if ($configuredServers.Count -eq 0) {
+        throw "$($game.displayName) is enabled but has no configured server stats endpoint."
+    }
 }
 
-$steamPath = if ($DryRun) { "steam.exe" } else { Get-SteamPath -AppId ([int]$config.steamAppId) }
 $playerProfile = Get-PlayerProfile -Config $config
 $steamName = $playerProfile.playerName
 
 Write-Host ""
-Write-Host "Hell Let Loose: Vietnam seeding helper"
+Write-Host "EASY Hell Let Loose seeding helper"
 Write-Host "Player: $steamName"
 Write-Host "Config: $ConfigPath"
+Write-Host "Games: $(@($enabledGames.displayName) -join ' -> ')"
 Write-Host ""
 
 Show-SeedingDashboard -PlayerName $steamName -Message "Starting server checks..."
 
+$skippedServerUntil = @{}
 do {
-    Stop-Game -Config $config
-
-    $serverStatuses = @(Get-ServerStatuses -Config $config -Servers $configuredServers -LogResults)
-
-    Show-SeedingDashboard -PlayerName $steamName -ServerStatuses $serverStatuses -Message "Finished checking all servers."
-
-    $targetStatus = @($serverStatuses |
-        Where-Object { $_.IsActiveSeed } |
-        Sort-Object @{ Expression = "Players"; Descending = $true }, @{ Expression = "Order"; Descending = $false } |
-        Select-Object -First 1)
-
-    if ($targetStatus.Count -eq 0) {
-        $targetStatus = @($serverStatuses |
-            Where-Object { $_.IsUnderSeedThreshold } |
-            Sort-Object @{ Expression = "Order"; Descending = $false } |
-            Select-Object -First 1)
-
-        if ($targetStatus.Count -eq 0) {
-            Write-Log "No EASY HLLV servers are under $($config.seedBelowPlayers) players. Checking again in $($config.pollSeconds) seconds."
-            if ($Once) { break }
-            Wait-WithDashboardCountdown -Seconds ([int]$config.pollSeconds) -PlayerName $steamName -ServerStatuses $serverStatuses -Message "No servers under 50. Waiting to check again."
-            continue
-        }
-
-        Write-Log "No active seed has more than $($config.activeSeedPlayers) players. Using server order priority."
+    foreach ($game in $enabledGames) {
+        Stop-Game -Config $game -QuietIfStopped
     }
 
+    $serverStatuses = @(Get-AllServerStatuses -Games $allGames -LogResults)
+    Show-SeedingDashboard -PlayerName $steamName -ServerStatuses $serverStatuses -Message "Finished checking HLLV and HLL WW2 servers."
+
+    $targetStatus = @(Get-PrioritySeedingTarget -Statuses $serverStatuses -Games $enabledGames -SkipUntil $skippedServerUntil)
+    if ($targetStatus.Count -gt 0 -and
+        (!$targetStatus[0].Game -or !$targetStatus[0].Server -or [string]::IsNullOrWhiteSpace("$($targetStatus[0].ServerNumber)"))) {
+        Write-Log "The priority scan returned an invalid server target. Ignoring it and checking again on the next scan."
+        $targetStatus = @()
+    }
+    if ($targetStatus.Count -gt 0 -and $targetStatus[0].GameId -ne "hllv" -and
+        @($enabledGames | Where-Object { $_.gameId -eq "hllv" }).Count -gt 0) {
+        Write-Log "No available HLLV server currently needs seeding. Checking HLL WW2 next."
+    }
+
+    if ($targetStatus.Count -eq 0) {
+        $downStatuses = @($serverStatuses | Where-Object { $_.GameEnabled -and $_.IsAvailable -eq $false })
+        $waitMessage = "All selected games are seeded. Waiting to check again."
+        if ($downStatuses.Count -gt 0) {
+            $downLabels = @($downStatuses | ForEach-Object { "$($_.GameName) server $($_.ServerNumber)" }) -join ", "
+            Write-Log "$downLabels DOWN and skipped. Checking again in $($config.pollSeconds) seconds."
+            $waitMessage = "Down servers are skipped. Waiting to check again."
+        } else {
+            Write-Log "All enabled EASY servers are at 50 players or higher. Checking again in $($config.pollSeconds) seconds."
+        }
+        if ($Once) { break }
+        Wait-WithDashboardCountdown -Seconds ([int]$config.pollSeconds) -PlayerName $steamName -ServerStatuses $serverStatuses -Message $waitMessage
+        continue
+    }
+
+    $gameConfig = $targetStatus[0].Game
     $server = $targetStatus[0].Server
-    Write-Log "Best seeding target is server #$($targetStatus[0].ServerNumber) at $($targetStatus[0].Players)/$($config.maxPlayers). Connecting now."
-    Show-SeedingDashboard -PlayerName $steamName -ServerStatuses $serverStatuses -Message "Joining server #$($targetStatus[0].ServerNumber) now."
-    Start-Server -Config $config -Server $server -SteamPath $steamPath
+    $serverNumber = $targetStatus[0].ServerNumber
+    Write-Log "Best target is $($gameConfig.displayName) server $serverNumber at $($targetStatus[0].Players)/$($gameConfig.maxPlayers). Connecting now."
+    Show-SeedingDashboard -PlayerName $steamName -ServerStatuses $serverStatuses -Message "Joining $($gameConfig.displayName) server $serverNumber now."
+    try {
+        $steamPath = if ($DryRun) { "steam.exe" } else { Get-SteamPath -AppId ([int]$gameConfig.steamAppId) }
+        Start-Server -Config $gameConfig -Server $server -SteamPath $steamPath
+    } catch {
+        $failedKey = Get-ServerStatusKey -Status $targetStatus[0]
+        $skippedServerUntil[$failedKey] = (Get-Date).AddSeconds([int]$gameConfig.pollSeconds)
+        Write-Log "Could not launch or join $($gameConfig.displayName) server $serverNumber. Skipping it for this scan and continuing by priority."
+        Stop-Game -Config $gameConfig -QuietIfStopped
+        continue
+    }
+    if ($DryRun) {
+        Write-Log "Dry run selected $($gameConfig.displayName) server $serverNumber. No game was launched."
+        break
+    }
 
     $players = [int]$targetStatus[0].Players
     $restartScan = $false
     do {
-        $serverNumber = Get-ServerNumber -Server $server
-        $latestServerStatuses = @(Get-ServerStatuses -Config $config -Servers $configuredServers)
+        $latestServerStatuses = @(Get-AllServerStatuses -Games $allGames)
         if ($latestServerStatuses.Count -gt 0) {
             $serverStatuses = $latestServerStatuses
         }
 
-        Wait-WithDashboardCountdown -Seconds ([int]$config.pollSeconds) -PlayerName $steamName -ServerStatuses $serverStatuses -Message "You are seeding server #$serverNumber."
-        try {
-            $latestServerStatuses = @(Get-ServerStatuses -Config $config -Servers $configuredServers)
-            if ($latestServerStatuses.Count -gt 0) {
-                $serverStatuses = $latestServerStatuses
-            }
-
-            $players = Get-PlayerCount -Server $server
-            $connected = Test-PlayerConnected -Server $server -PlayerProfile $playerProfile
-        } catch {
-            Write-Log "Could not check EASY stats for $($server.name): $($_.Exception.Message). Staying connected and trying again next check."
-            continue
+        $currentStatus = @($latestServerStatuses | Where-Object {
+            $_.GameId -eq $gameConfig.gameId -and "$($_.ServerNumber)" -eq "$serverNumber"
+        } | Select-Object -First 1)
+        if ($currentStatus.Count -eq 0 -or $currentStatus[0].IsAvailable -eq $false) {
+            Write-Log "$($gameConfig.displayName) server $serverNumber is DOWN. Closing $($gameConfig.displayName) and checking the other servers."
+            Stop-Game -Config $gameConfig
+            $restartScan = $true
+            break
         }
 
-        if (!$connected) {
-            Write-Log "$steamName is not detected on $($server.name). Closing HLLV and checking all servers again."
-            Stop-Game -Config $config
+        $players = [int]$currentStatus[0].Players
+        if (!$currentStatus[0].IsUnderSeedThreshold) {
+            break
+        }
+
+        $preferredTarget = @(Get-PrioritySeedingTarget -Statuses $latestServerStatuses -Games $enabledGames -SkipUntil $skippedServerUntil)
+        if ($preferredTarget.Count -gt 0 -and
+            ($preferredTarget[0].GameId -ne $gameConfig.gameId -or "$($preferredTarget[0].ServerNumber)" -ne "$serverNumber")) {
+            Write-Log "Priority scan now selects $($preferredTarget[0].GameName) server $($preferredTarget[0].ServerNumber). Closing $($gameConfig.displayName) server $serverNumber and switching."
+            Stop-Game -Config $gameConfig
+            $restartScan = $true
+            break
+        }
+
+        $gameProcesses = @(Get-GameProcesses -Config $gameConfig)
+        if ($gameProcesses.Count -eq 0) {
+            $failedKey = Get-ServerStatusKey -Status $currentStatus[0]
+            $skippedServerUntil[$failedKey] = (Get-Date).AddSeconds([int]$gameConfig.pollSeconds)
+            Write-Log "$($gameConfig.displayName) failed to stay open for server $serverNumber. Skipping that server for this scan and continuing by priority."
+            $restartScan = $true
+            break
+        }
+
+        try {
+            $connectionState = Get-PlayerConnectionState -Server $server -PlayerProfile $playerProfile
+        } catch {
+            Write-Log "$($gameConfig.displayName) server $serverNumber is DOWN because its stats page is unavailable. Closing the game and checking the other servers."
+            Stop-Game -Config $gameConfig
+            $restartScan = $true
+            break
+        }
+
+        if (!$connectionState.Connected) {
+            $detectionDetail = if ($connectionState.MatchFound) {
+                "matching stats row status: $(@($connectionState.MatchingStatuses) -join ', ')"
+            } else {
+                "name absent from $($connectionState.OnlinePlayerCount) online stats row(s)"
+            }
+
+            $failedKey = Get-ServerStatusKey -Status $currentStatus[0]
+            $skippedServerUntil[$failedKey] = (Get-Date).AddSeconds([int]$gameConfig.pollSeconds)
+            Write-Log "$steamName was not confirmed on $($server.name) ($detectionDetail). Treating the connection as failed, skipping this server for the current scan, and continuing by priority."
+            Stop-Game -Config $gameConfig
             $restartScan = $true
             break
         } else {
-            $serverNumber = Get-ServerNumber -Server $server
-            Write-Log "You are seeding server #$serverNumber. Population is $players/$($config.maxPlayers)."
-            Show-SeedingDashboard -PlayerName $steamName -ServerStatuses $serverStatuses -Message "You are seeding server #$serverNumber. Population is $players/$($config.maxPlayers)."
+            Write-Log "You are seeding $($gameConfig.displayName) server $serverNumber. Population is $players/$($gameConfig.maxPlayers)."
+            Show-SeedingDashboard -PlayerName $steamName -ServerStatuses $serverStatuses -Message "You are seeding $($gameConfig.displayName) server $serverNumber. Population is $players/$($gameConfig.maxPlayers)."
         }
-    } until ($restartScan -or $players -gt [int]$config.seededAtPlayers)
+
+        Wait-WithDashboardCountdown -Seconds ([int]$gameConfig.pollSeconds) -PlayerName $steamName -ServerStatuses $serverStatuses -Message "You are seeding $($gameConfig.displayName) server $serverNumber."
+    } while (!$restartScan)
 
     if ($restartScan) {
         continue
     }
 
-    Write-Log "$($server.name) reached $players/$($config.maxPlayers). Closing game and checking all servers again."
-    Stop-Game -Config $config
+    Write-Log "$($server.name) reached $players/$($gameConfig.maxPlayers). Closing $($gameConfig.displayName) and checking the selected games again."
+    Stop-Game -Config $gameConfig
 } while (!$Once)
 
-Stop-Transcript | Out-Null
+$script:StatusMessage = "Seeder stopped."
+$script:StatusNextCheckSeconds = -1
+Publish-SeederStatus -Running $false
+Stop-SeederTranscript

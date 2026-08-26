@@ -1,5 +1,15 @@
 # Changelog
 
+## v2.3.4
+
+- Adds the native Windows seeding dashboard, first-run setup, Desktop shortcut creation, live server data, and timing settings.
+- Adds optional HLL WW2 seeding while keeping HLLV as the first priority.
+- Checks HLLV servers strictly in #1 through #5 order and returns to the highest-priority eligible HLLV server on each scan.
+- Marks unavailable stats servers DOWN, skips them safely, and checks them again once per minute without retrying HTTP 5xx errors.
+- Falls through after launch, join, or player-confirmation failures without producing an invalid Steam launch.
+- Stops seeding at 50 players and retains only the latest 24 hours in `log.txt`.
+- Adds the EASY Seeding Helper application icon and modern desktop UI.
+
 ## v1.1.1
 
 - Fixes stale dashboard server counts while actively seeding.

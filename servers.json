@@ -1,5 +1,11 @@
-﻿{
+{
+    "version":  "2.3.4",
+    "enabledGames":  {
+                         "hllv":  true,
+                         "hllWw2":  false
+                     },
     "steamAppId":  3079210,
+    "playerProfileFile":  "player-profile.json",
     "playerNameFile":  "name.txt",
     "seedBelowPlayers":  50,
     "activeSeedPlayers":  3,
@@ -9,6 +15,7 @@
     "postClickWaitSeconds":  60,
     "pollSeconds":  60,
     "reconnectWaitSeconds":  60,
+    "connectionMissesBeforeRestart":  3,
     "closeGraceSeconds":  30,
     "uiAutomation":  {
                          "enabled":  true,
@@ -18,6 +25,7 @@
                          "focusY":  500,
                          "enlistX":  135,
                          "enlistY":  681,
+                         "enlistClickCount":  2,
                          "searchX":  1605,
                          "searchY":  150,
                          "joinX":  1295,
@@ -32,8 +40,7 @@
                              "HLLVietnam-Win64-Shipping",
                              "HLLV-Win64-Shipping",
                              "HellLetLooseVietnam-Win64-Shipping",
-                             "HellLetLooseVietnam",
-                             "HLL-Win64-Shipping"
+                             "HellLetLooseVietnam"
                          ],
     "servers":  [
                     {
@@ -71,5 +78,52 @@
                         "searchText":  "EASY Company #5",
                         "enabled":  true
                     }
-                ]
+                ],
+    "hllWw2":  {
+                   "displayName":  "HLL WW2",
+                   "steamAppId":  686810,
+                   "seedBelowPlayers":  50,
+                   "activeSeedPlayers":  3,
+                   "seededAtPlayers":  50,
+                   "maxPlayers":  100,
+                   "launchWaitSeconds":  45,
+                   "postClickWaitSeconds":  60,
+                   "pollSeconds":  60,
+                   "reconnectWaitSeconds":  60,
+                   "connectionMissesBeforeRestart":  3,
+                   "closeGraceSeconds":  30,
+                   "uiAutomation":  {
+                                        "enabled":  true,
+                                        "referenceWidth":  1920,
+                                        "referenceHeight":  1080,
+                                        "focusX":  500,
+                                        "focusY":  500,
+                                        "enlistX":  120,
+                                        "enlistY":  580,
+                                        "enlistClickCount":  1,
+                                        "searchX":  1000,
+                                        "searchY":  199,
+                                        "joinX":  1480,
+                                        "joinY":  390,
+                                        "menuReadyWaitSeconds":  10,
+                                        "afterFocusClickWaitSeconds":  15,
+                                        "browserWaitSeconds":  10,
+                                        "searchWaitSeconds":  8,
+                                        "joinWaitSeconds":  45
+                                    },
+                   "gameProcessNames":  [
+                                            "HLL-Win64-Shipping",
+                                            "Launch_HLL"
+                                        ],
+                   "servers":  [
+                                   {
+                                       "number":  "WW2",
+                                       "name":  "EASY Company | New Players Welcome | DISCORD.GG/EASYCOMPANY | QONZER",
+                                       "easyStatsUrl":  "https://stats6.easyhll.com",
+                                       "battleMetricsId":  "",
+                                       "searchText":  "EASY Company | New Players Welcome",
+                                       "enabled":  true
+                                   }
+                               ]
+               }
 }
