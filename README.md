@@ -1,4 +1,4 @@
-# EASY Seeding Helper v2.3.4
+# EASY Seeding Helper v2.3.5
 
 ## First-Time Setup
 

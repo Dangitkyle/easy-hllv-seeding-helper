@@ -218,6 +218,13 @@ public class HllvClicker
         public int Bottom;
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    public struct POINT
+    {
+        public int X;
+        public int Y;
+    }
+
     const int MOUSEEVENTF_LEFTDOWN = 0x0002;
     const int MOUSEEVENTF_LEFTUP = 0x0004;
 
@@ -240,7 +247,10 @@ public class HllvClicker
     public static extern void keybd_event(byte bVk, byte bScan, int dwFlags, int dwExtraInfo);
 
     [DllImport("user32.dll")]
-    public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+    public static extern bool GetClientRect(IntPtr hWnd, out RECT lpRect);
+
+    [DllImport("user32.dll")]
+    public static extern bool ClientToScreen(IntPtr hWnd, ref POINT lpPoint);
 
     public static void LeftClickAtPoint(int x, int y)
     {
@@ -311,7 +321,9 @@ function Get-GameWindowBounds {
     }
 
     $rect = New-Object HllvClicker+RECT
-    if (![HllvClicker]::GetWindowRect($process.MainWindowHandle, [ref]$rect)) {
+    $origin = New-Object HllvClicker+POINT
+    if (![HllvClicker]::GetClientRect($process.MainWindowHandle, [ref]$rect) -or
+        ![HllvClicker]::ClientToScreen($process.MainWindowHandle, [ref]$origin)) {
         return $null
     }
 
@@ -322,8 +334,8 @@ function Get-GameWindowBounds {
     }
 
     [pscustomobject]@{
-        Left = $rect.Left
-        Top = $rect.Top
+        Left = $origin.X
+        Top = $origin.Y
         Width = $width
         Height = $height
         ProcessId = $process.Id
@@ -344,12 +356,21 @@ function Convert-UiPointToScreenPoint {
 
     $referenceWidth = if ($Config.uiAutomation.referenceWidth) { [double]$Config.uiAutomation.referenceWidth } else { 1920.0 }
     $referenceHeight = if ($Config.uiAutomation.referenceHeight) { [double]$Config.uiAutomation.referenceHeight } else { 1080.0 }
+    $scale = [Math]::Min($bounds.Width / $referenceWidth, $bounds.Height / $referenceHeight)
+    $viewportWidth = $referenceWidth * $scale
+    $viewportHeight = $referenceHeight * $scale
+    $viewportLeft = $bounds.Left + (($bounds.Width - $viewportWidth) / 2.0)
+    $viewportTop = $bounds.Top + (($bounds.Height - $viewportHeight) / 2.0)
 
     [pscustomobject]@{
-        X = [int][Math]::Round($bounds.Left + ($X / $referenceWidth) * $bounds.Width)
-        Y = [int][Math]::Round($bounds.Top + ($Y / $referenceHeight) * $bounds.Height)
+        X = [int][Math]::Round($viewportLeft + ($X * $scale))
+        Y = [int][Math]::Round($viewportTop + ($Y * $scale))
         AutoDetected = $true
         Bounds = $bounds
+        ViewportLeft = [int][Math]::Round($viewportLeft)
+        ViewportTop = [int][Math]::Round($viewportTop)
+        ViewportWidth = [int][Math]::Round($viewportWidth)
+        ViewportHeight = [int][Math]::Round($viewportHeight)
     }
 }
 
@@ -363,7 +384,7 @@ function Invoke-GameClick {
 
     $point = Convert-UiPointToScreenPoint -Config $Config -X $X -Y $Y
     if ($point.AutoDetected -and $point.Bounds) {
-        Write-Log "Auto-detected $($Config.displayName) display/window $($point.Bounds.Width)x$($point.Bounds.Height) at $($point.Bounds.Left),$($point.Bounds.Top). Clicking $Name at $($point.X),$($point.Y)."
+        Write-Log "Auto-detected $($Config.displayName) client $($point.Bounds.Width)x$($point.Bounds.Height) at $($point.Bounds.Left),$($point.Bounds.Top); centered UI viewport $($point.ViewportWidth)x$($point.ViewportHeight) at $($point.ViewportLeft),$($point.ViewportTop). Clicking $Name at $($point.X),$($point.Y)."
     } else {
         Write-Log "Could not auto-detect $($Config.displayName) display/window. Clicking $Name at configured screen point $X,$Y."
     }
@@ -372,7 +393,7 @@ function Invoke-GameClick {
 }
 
 $DefaultConfig = [ordered]@{
-    version = "2.3.4"
+    version = "2.3.5"
     enabledGames = [ordered]@{ hllv = $true; hllWw2 = $true }
     steamAppId = 3079210
     playerProfileFile = "player-profile.json"
@@ -501,7 +522,7 @@ function Publish-SeederStatus {
     }
 
     $payload = [ordered]@{
-        version = "2.3.4"
+        version = "2.3.5"
         running = $Running
         playerName = $script:StatusPlayerName
         message = $script:StatusMessage
@@ -578,7 +599,7 @@ function Show-SeedingDashboard {
     }
 
     Clear-Host
-    Write-Host "EASY Seeding Helper v2.3.4"
+    Write-Host "EASY Seeding Helper v2.3.5"
     Write-Host ""
     Write-Host "Player: $PlayerName"
     Write-Host "Status: $Message"
@@ -714,7 +735,7 @@ function Get-Config {
     }
 
     $config = Get-Content -Path $ConfigPath -Raw | ConvertFrom-Json
-    if (!$config.version) { $config | Add-Member -NotePropertyName version -NotePropertyValue "2.3.4" }
+    if (!$config.version) { $config | Add-Member -NotePropertyName version -NotePropertyValue "2.3.5" }
     if (!$config.enabledGames) {
         $config | Add-Member -NotePropertyName enabledGames -NotePropertyValue ([pscustomobject]@{ hllv = $true; hllWw2 = $true })
     }

@@ -1,5 +1,11 @@
 # Changelog
 
+## v2.3.5
+
+- Fixes Enlist, search, and Join click positions on ultrawide and non-16:9 displays.
+- Uses the game client area instead of the outer window frame when calculating clicks.
+- Preserves and centers the 1920x1080 game UI viewport instead of stretching it across the full window.
+
 ## v2.3.4
 
 - Adds the native Windows seeding dashboard, first-run setup, Desktop shortcut creation, live server data, and timing settings.
