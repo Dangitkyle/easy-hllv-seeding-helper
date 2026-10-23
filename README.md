@@ -1,4 +1,4 @@
-# EASY Seeding Helper v2.3.5
+# EASY Seeding Helper v3.0.0
 
 ## First-Time Setup
 
@@ -10,7 +10,7 @@
 ## Start Seeding
 
 1. Open **EASY Seeding Helper** from your Desktop.
-2. Check **HLLV**, **HLL WW2**, or both.
+2. Check the games you want to seed: **WARDOGS**, **HLLV**, and/or **HLL WW2**.
 3. Click **Start Seeding**.
 4. Leave the helper open while it checks and seeds EASY servers.
 5. Click **Stop** when you are finished. The current game will remain open.
@@ -23,7 +23,7 @@
 
 ## What The Helper Shows
 
-- Current player counts for five HLLV servers and the EASY HLL WW2 server.
+- Current player counts for EASY WARDOGS East, West, and Comp, five HLLV servers, and the EASY HLL WW2 server.
 - Live server counts that continue refreshing once per minute while seeding is stopped.
 - Which servers are under 50 players or already actively seeding.
 - The game and server the helper is joining or seeding.
@@ -32,25 +32,36 @@
 
 ## Important
 
-- Do not click around while the helper is opening either game and joining a server.
+- Do not click around while the helper is opening a game and joining a server.
 - Keep Steam signed in.
-- HLLV always has priority over HLL WW2. HLLV servers are checked in #1 through #5 order, and the first available server below 50 players is selected.
-- HLL WW2 is seeded only when no available HLLV server needs seeding. If an HLLV server becomes available again, the helper returns to the highest-priority HLLV server on the next check.
+- When multiple games are checked, the order is **WARDOGS -> HLLV -> HLL WW2**.
+- WARDOGS checks East, then West. Comp / NA CENTRAL is optional and comes after West.
+- HLLV servers are checked in #1 through #5 order. The first available enabled server below 50 players is selected.
+- Every check starts at the top of the priority order. If a higher-priority server needs seeding again, the helper switches back to it.
 - The helper stops seeding each server when it reaches 50 players.
 - A server whose stats page is down is marked **DOWN**, skipped, and checked again during the next one-minute scan.
 - If a game fails to open, join, or confirm your connection, that server is skipped for the current scan and the helper continues by priority.
 - If you are kicked or disconnected, the helper starts a fresh priority scan.
+
+## WARDOGS
+
+- Keep WARDOGS in the foreground while seeding. Activity clicks pause when another app is in front or WARDOGS is minimized.
+- The helper joins by server ID, quickly clicks all three faction choices, and confirms the match screen before clicking every five seconds.
+- Use the game's English interface and have Windows English OCR support installed.
+- To seed the competition server, open **Settings** and check **Include WARDOGS Comp / NA CENTRAL** while the seeder is stopped.
+- Counts come from the [Wardog Servers community API](https://wardogservers.com/devs), which can be a few minutes behind the game. Unavailable or stale data is skipped.
+- Click **Stop** before playing normally to stop the helper's activity clicks.
 
 ## Timing Settings
 
 The recommended settings work for most PCs. Only change them when a game or server browser loads too slowly.
 
 1. Open the **Settings** page.
-2. Select the **HLLV** or **HLL WW2** tab.
+2. Select the **WARDOGS**, **HLLV**, or **HLL WW2** tab.
 3. Increase the timing value for the step that runs too early.
 4. Click **Save Settings** before returning to the seeder.
 
-Timing settings can only be changed while the seeder is stopped. Use **Recommended** to restore the measured timing values for both games.
+Timing settings can only be changed while the seeder is stopped. Use **Recommended** to restore the recommended timing values for all games.
 
 ## Desktop Shortcut
 

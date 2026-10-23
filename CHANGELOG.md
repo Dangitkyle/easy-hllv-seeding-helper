@@ -1,5 +1,16 @@
 # Changelog
 
+## v3.0.0
+
+- Adds WARDOGS seeding for EASY NA EAST and NA WEST, with optional Comp / NA CENTRAL.
+- Seeds selected games in WARDOGS, HLLV, then HLL WW2 priority order.
+- Uses the Wardog Servers community API for player counts and stable server IDs for joining.
+- Confirms the server lookup, quickly clicks all three faction choices, and recognizes the joined match screen.
+- Clicks every five seconds after joining a team, pausing when WARDOGS is not in the foreground or the match screen is not confirmed.
+- Adds WARDOGS game selection, timing settings, Comp selection, and live server rows.
+- Handles the graphics-driver notice and OCR reading JOIN BY ID as JOIN BY IO.
+- Corrects the expanded dashboard layout and preserves the 50-player threshold and 24-hour log retention.
+
 ## v2.3.5
 
 - Fixes Enlist, search, and Join click positions on ultrawide and non-16:9 displays.

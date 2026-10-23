@@ -1,6 +1,6 @@
 ##############################################################
 # EASY Hell Let Loose seeding helper
-# Seeds HLLV first, then HLL WW2 when its HLLV work is complete.
+# Seeds WARDOGS, then HLLV, then HLL WW2 when enabled.
 ##############################################################
 param (
     [string]$ConfigPath = "$PSScriptRoot\servers.json",
@@ -14,6 +14,7 @@ param (
 $ErrorActionPreference = "Stop"
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
+. (Join-Path $PSScriptRoot 'WardogsSupport.ps1')
 
 $script:StatusFilePath = Join-Path $BasePath "seeder-status.json"
 $script:LogPath = Join-Path $BasePath "log.txt"
@@ -393,7 +394,7 @@ function Invoke-GameClick {
 }
 
 $DefaultConfig = [ordered]@{
-    version = "2.3.5"
+    version = "3.0.0"
     enabledGames = [ordered]@{ hllv = $true; hllWw2 = $true }
     steamAppId = 3079210
     playerProfileFile = "player-profile.json"
@@ -522,7 +523,7 @@ function Publish-SeederStatus {
     }
 
     $payload = [ordered]@{
-        version = "2.3.5"
+        version = "3.0.0"
         running = $Running
         playerName = $script:StatusPlayerName
         message = $script:StatusMessage
@@ -599,7 +600,7 @@ function Show-SeedingDashboard {
     }
 
     Clear-Host
-    Write-Host "EASY Seeding Helper v2.3.5"
+    Write-Host "EASY Seeding Helper v3.0.0"
     Write-Host ""
     Write-Host "Player: $PlayerName"
     Write-Host "Status: $Message"
@@ -610,7 +611,7 @@ function Show-SeedingDashboard {
             Write-Host (Format-ServerStatusLine -Status $status)
         }
     } else {
-        Write-Host "HLLV and HLL WW2 servers: waiting for check"
+        Write-Host "Selected game servers: waiting for check"
     }
 
     Write-Host ""
@@ -662,6 +663,7 @@ function Get-ServerStatuses {
     for ($index = 0; $index -lt $Servers.Count; $index++) {
         $server = $Servers[$index]
         $serverNumber = Get-ServerNumber -Server $server
+        $serverEnabled = $Config.gameEnabled -and $server.enabled -ne $false
 
         try {
             $players = Get-PlayerCount -Server $server
@@ -674,7 +676,7 @@ function Get-ServerStatuses {
                 Game = $Config
                 GameId = "$($Config.gameId)"
                 GameName = "$($Config.displayName)"
-                GameEnabled = [bool]$Config.gameEnabled
+                GameEnabled = [bool]$serverEnabled
                 GamePriority = $GamePriority
                 Server = $server
                 ServerNumber = $serverNumber
@@ -691,7 +693,7 @@ function Get-ServerStatuses {
         $isUnderSeedThreshold = $players -lt [int]$Config.seedBelowPlayers
         $isActiveSeed = $players -gt [int]$Config.activeSeedPlayers -and $isUnderSeedThreshold
         if ($LogResults) {
-            if (!$Config.gameEnabled) {
+            if (!$serverEnabled) {
                 Write-Log "$($Config.displayName) server $serverNumber is $players/$($Config.maxPlayers) - disabled."
             } elseif ($isActiveSeed) {
                 Write-Log "$($Config.displayName) server $serverNumber is $players/$($Config.maxPlayers) - active seed."
@@ -706,7 +708,7 @@ function Get-ServerStatuses {
             Game = $Config
             GameId = "$($Config.gameId)"
             GameName = "$($Config.displayName)"
-            GameEnabled = [bool]$Config.gameEnabled
+            GameEnabled = [bool]$serverEnabled
             GamePriority = $GamePriority
             Server = $server
             ServerNumber = $serverNumber
@@ -735,7 +737,7 @@ function Get-Config {
     }
 
     $config = Get-Content -Path $ConfigPath -Raw | ConvertFrom-Json
-    if (!$config.version) { $config | Add-Member -NotePropertyName version -NotePropertyValue "2.3.5" }
+    if (!$config.version) { $config | Add-Member -NotePropertyName version -NotePropertyValue "3.0.0" }
     if (!$config.enabledGames) {
         $config | Add-Member -NotePropertyName enabledGames -NotePropertyValue ([pscustomobject]@{ hllv = $true; hllWw2 = $true })
     }
@@ -747,6 +749,7 @@ function Get-Config {
     if (!$config.servers -or $config.servers.Count -eq 0) {
         throw "No servers are configured. Add at least one server to $ConfigPath."
     }
+    Initialize-WardogsConfig -Config $config
     return $config
 }
 
@@ -768,7 +771,10 @@ function Get-GameConfigurations {
         }
     }
 
-    return @($Config, $ww2)
+    $wardogs = $Config.wardogs
+    $wardogs | Add-Member -NotePropertyName gameId -NotePropertyValue 'wardogs' -Force
+    $wardogs | Add-Member -NotePropertyName gameEnabled -NotePropertyValue ([bool]$Config.enabledGames.wardogs) -Force
+    return @($wardogs, $Config, $ww2)
 }
 
 function Get-AllServerStatuses {
@@ -780,7 +786,7 @@ function Get-AllServerStatuses {
     $statuses = @()
     for ($gameIndex = 0; $gameIndex -lt $Games.Count; $gameIndex++) {
         $game = $Games[$gameIndex]
-        $servers = @($game.servers | Where-Object { $_.enabled -ne $false })
+        $servers = @($game.servers)
         if ($servers.Count -eq 0) {
             continue
         }
@@ -815,6 +821,7 @@ function Get-PrioritySeedingTarget {
             Where-Object {
                 $statusKey = Get-ServerStatusKey -Status $_
                 $_.GameId -eq $game.gameId -and
+                    $_.GameEnabled -and
                     $_.IsAvailable -ne $false -and
                     $_.IsUnderSeedThreshold -and
                     !$SkipUntil.ContainsKey($statusKey)
@@ -895,6 +902,7 @@ function Stop-Game {
         [switch]$QuietIfStopped
     )
 
+    if ($Config.gameId -eq 'wardogs') { Stop-WardogsActivity }
     $processes = @(Get-GameProcesses -Config $Config)
     if ($processes.Count -eq 0) {
         if (!$QuietIfStopped) {
@@ -960,6 +968,9 @@ function Invoke-EasyRestMethod {
 function Get-PlayerCount {
     param([object]$Server)
 
+    if ($Server.joinCode) {
+        return (Get-WardogsServerData -Server $Server).Players
+    }
     if (![string]::IsNullOrWhiteSpace($Server.easyStatsUrl)) {
         $uri = "$($Server.easyStatsUrl.TrimEnd('/'))/api/get_public_info"
         $json = Invoke-EasyRestMethod -Uri $uri
@@ -994,9 +1005,13 @@ function ConvertTo-ComparablePlayerName {
 function Get-PlayerConnectionState {
     param(
         [object]$Server,
-        [object]$PlayerProfile
+        [object]$PlayerProfile,
+        [object]$Config
     )
 
+    if ($Server.joinCode) {
+        return Get-WardogsConnectionState -Config $Config -Server $Server
+    }
     $expectedName = ConvertTo-ComparablePlayerName -PlayerName "$($PlayerProfile.playerName)"
 
     if (![string]::IsNullOrWhiteSpace($Server.easyStatsUrl)) {
@@ -1057,6 +1072,10 @@ function Start-Server {
     }
     Start-Sleep -Seconds ([int]$Config.launchWaitSeconds)
 
+    if ($Config.gameId -eq 'wardogs') {
+        Start-WardogsServer -Config $Config -Server $Server
+        return
+    }
     if ($Config.uiAutomation -and $Config.uiAutomation.enabled -ne $false) {
         $searchText = if (![string]::IsNullOrWhiteSpace($Server.searchText)) { $Server.searchText } else { $Server.name }
         Write-Log "Using the $($Config.displayName) server browser to join $searchText."
@@ -1165,7 +1184,7 @@ $config = Get-Config
 $allGames = @(Get-GameConfigurations -Config $config)
 $enabledGames = @($allGames | Where-Object { $_.gameEnabled })
 if ($enabledGames.Count -eq 0) {
-    Write-Host "No games are enabled. Select HLLV, HLL WW2, or both in the helper."
+    Write-Host "No games are enabled. Select WARDOGS, HLLV, or HLL WW2 in the helper."
     Stop-SeederTranscript
     exit 0
 }
@@ -1174,7 +1193,8 @@ foreach ($game in $enabledGames) {
     $configuredServers = @($game.servers | Where-Object {
         $_.enabled -ne $false -and (
             (![string]::IsNullOrWhiteSpace($_.easyStatsUrl) -and $_.easyStatsUrl -notmatch "^REPLACE_WITH_") -or
-            (![string]::IsNullOrWhiteSpace($_.battleMetricsId) -and $_.battleMetricsId -notmatch "^REPLACE_WITH_")
+            (![string]::IsNullOrWhiteSpace($_.battleMetricsId) -and $_.battleMetricsId -notmatch "^REPLACE_WITH_") -or
+            (![string]::IsNullOrWhiteSpace($_.joinCode))
         )
     })
     if ($configuredServers.Count -eq 0) {
@@ -1186,7 +1206,7 @@ $playerProfile = Get-PlayerProfile -Config $config
 $steamName = $playerProfile.playerName
 
 Write-Host ""
-Write-Host "EASY Hell Let Loose seeding helper"
+Write-Host "EASY Seeding Helper"
 Write-Host "Player: $steamName"
 Write-Host "Config: $ConfigPath"
 Write-Host "Games: $(@($enabledGames.displayName) -join ' -> ')"
@@ -1201,7 +1221,7 @@ do {
     }
 
     $serverStatuses = @(Get-AllServerStatuses -Games $allGames -LogResults)
-    Show-SeedingDashboard -PlayerName $steamName -ServerStatuses $serverStatuses -Message "Finished checking HLLV and HLL WW2 servers."
+    Show-SeedingDashboard -PlayerName $steamName -ServerStatuses $serverStatuses -Message "Finished checking the selected games."
 
     $targetStatus = @(Get-PrioritySeedingTarget -Statuses $serverStatuses -Games $enabledGames -SkipUntil $skippedServerUntil)
     if ($targetStatus.Count -gt 0 -and
@@ -1209,7 +1229,7 @@ do {
         Write-Log "The priority scan returned an invalid server target. Ignoring it and checking again on the next scan."
         $targetStatus = @()
     }
-    if ($targetStatus.Count -gt 0 -and $targetStatus[0].GameId -ne "hllv" -and
+    if ($targetStatus.Count -gt 0 -and $targetStatus[0].GameId -eq 'hllWw2' -and
         @($enabledGames | Where-Object { $_.gameId -eq "hllv" }).Count -gt 0) {
         Write-Log "No available HLLV server currently needs seeding. Checking HLL WW2 next."
     }
@@ -1240,7 +1260,7 @@ do {
     } catch {
         $failedKey = Get-ServerStatusKey -Status $targetStatus[0]
         $skippedServerUntil[$failedKey] = (Get-Date).AddSeconds([int]$gameConfig.pollSeconds)
-        Write-Log "Could not launch or join $($gameConfig.displayName) server $serverNumber. Skipping it for this scan and continuing by priority."
+        Write-Log "Could not launch or join $($gameConfig.displayName) server ${serverNumber}: $($_.Exception.Message). Skipping it for this scan and continuing by priority."
         Stop-Game -Config $gameConfig -QuietIfStopped
         continue
     }
@@ -1291,14 +1311,25 @@ do {
         }
 
         try {
-            $connectionState = Get-PlayerConnectionState -Server $server -PlayerProfile $playerProfile
+            $connectionState = Get-PlayerConnectionState -Server $server -PlayerProfile $playerProfile -Config $gameConfig
         } catch {
+            if ($gameConfig.gameId -eq 'wardogs') {
+                Write-Log "WARDOGS connection check failed: $($_.Exception.Message). Activity is paused while checking again."
+                Stop-WardogsActivity
+                Wait-WithDashboardCountdown -Seconds ([int]$gameConfig.pollSeconds) -PlayerName $steamName -ServerStatuses $serverStatuses -Message 'WARDOGS screen check unavailable. Activity paused.'
+                continue
+            }
             Write-Log "$($gameConfig.displayName) server $serverNumber is DOWN because its stats page is unavailable. Closing the game and checking the other servers."
             Stop-Game -Config $gameConfig
             $restartScan = $true
             break
         }
 
+        if ($gameConfig.gameId -eq 'wardogs' -and !$connectionState.Known) {
+            Write-Log $connectionState.Detail
+            Wait-WithDashboardCountdown -Seconds ([int]$gameConfig.pollSeconds) -PlayerName $steamName -ServerStatuses $serverStatuses -Message $connectionState.Detail
+            continue
+        }
         if (!$connectionState.Connected) {
             $detectionDetail = if ($connectionState.MatchFound) {
                 "matching stats row status: $(@($connectionState.MatchingStatuses) -join ', ')"
@@ -1332,3 +1363,4 @@ $script:StatusMessage = "Seeder stopped."
 $script:StatusNextCheckSeconds = -1
 Publish-SeederStatus -Running $false
 Stop-SeederTranscript
+Stop-WardogsActivity

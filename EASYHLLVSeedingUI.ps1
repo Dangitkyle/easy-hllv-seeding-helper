@@ -7,6 +7,7 @@ Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 Add-Type -AssemblyName System.Net.Http
 [System.Windows.Forms.Application]::EnableVisualStyles()
+. (Join-Path $PSScriptRoot 'WardogsSupport.ps1')
 
 $windowSource = @'
 using System;
@@ -107,9 +108,21 @@ if (!(Test-Path -LiteralPath $enginePath) -or !(Test-Path -LiteralPath $configPa
 }
 
 $config = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
+Initialize-WardogsConfig -Config $config
 $hllvServers = @($config.servers | Where-Object { $_.enabled -ne $false })
 $ww2Servers = @($config.hllWw2.servers | Where-Object { $_.enabled -ne $false })
 $serverDefinitions = @()
+foreach ($server in @($config.wardogs.servers)) {
+    $serverDefinitions += [pscustomobject]@{
+        Key = "wardogs:$($server.number)"
+        Number = "$($server.number)"
+        Label = "WD $($server.number)"
+        Details = if ($server.number -eq 'COMP') { 'COMP / NA CENTRAL / KOTH' } else { "NA $($server.number) / KOTH" }
+        Server = $server
+        GameConfig = $config.wardogs
+        GameId = 'wardogs'
+    }
+}
 for ($index = 0; $index -lt $hllvServers.Count; $index++) {
     $server = $hllvServers[$index]
     $number = if ("$($server.searchText) $($server.name)" -match "#(\d+)") { $Matches[1] } else { "$($index + 1)" }
@@ -346,7 +359,7 @@ function New-DesktopShortcut {
     if (Test-Path -LiteralPath $shortcutIconPath) {
         $shortcut.IconLocation = "$shortcutIconPath,0"
     }
-    $shortcut.Description = "Seed EASY HLLV and HLL WW2 servers"
+    $shortcut.Description = "Seed EASY WARDOGS, HLLV, and HLL WW2 servers"
     $shortcut.WindowStyle = 7
     $shortcut.Save()
     return $shortcutPath
@@ -664,12 +677,14 @@ function Add-Activity {
 function Set-UiRunningState {
     param([bool]$Running)
 
-    $hasSelectedGame = $hllvGameCheckBox.Checked -or $ww2GameCheckBox.Checked
+    $hasSelectedGame = $wardogsGameCheckBox.Checked -or $hllvGameCheckBox.Checked -or $ww2GameCheckBox.Checked
     $startButton.Enabled = !$Running -and $hasSelectedGame
     $stopButton.Enabled = $Running
     $editPlayerButton.Enabled = !$Running
     if ($hllvGameCheckBox) { $hllvGameCheckBox.Enabled = !$Running }
     if ($ww2GameCheckBox) { $ww2GameCheckBox.Enabled = !$Running }
+    if ($wardogsGameCheckBox) { $wardogsGameCheckBox.Enabled = !$Running }
+    if ($compServerCheckBox) { $compServerCheckBox.Enabled = !$Running }
     if ($script:TimingInputs) {
         foreach ($input in $script:TimingInputs) {
             $input.Enabled = !$Running
@@ -765,16 +780,28 @@ function Set-ServerRowVisual {
     $Row.State.ForeColor = $accent
 }
 
+function Test-DefinitionEnabled {
+    param([string]$Key)
+    if ($Key -like 'wardogs:*') {
+        return $wardogsGameCheckBox.Checked -and ($Key -ne 'wardogs:COMP' -or $compServerCheckBox.Checked)
+    }
+    if ($Key -like 'hllv:*') { return $hllvGameCheckBox.Checked }
+    return $ww2GameCheckBox.Checked
+}
+
 function Update-GameSelectionPresentation {
     param([switch]$UpdateReadyMessage)
 
     $selectedGames = @()
+    if ($wardogsGameCheckBox.Checked) { $selectedGames += 'WARDOGS' }
     if ($hllvGameCheckBox.Checked) { $selectedGames += "HLLV" }
     if ($ww2GameCheckBox.Checked) { $selectedGames += "HLL WW2" }
 
     $selectionText = if ($selectedGames.Count -gt 0) { $selectedGames -join " -> " } else { "No games selected" }
     $behaviorLabel.Text = "Selected: $selectionText  |  Stops at $($config.seededAtPlayers)/$($config.maxPlayers)"
-    $serversTitle.Text = if ($hllvGameCheckBox.Checked -and $ww2GameCheckBox.Checked) {
+    $serversTitle.Text = if ($wardogsGameCheckBox.Checked) {
+        'EASY SERVERS | WARDOGS PRIORITY'
+    } elseif ($hllvGameCheckBox.Checked -and $ww2GameCheckBox.Checked) {
         "EASY SERVERS  |  HLLV PRIORITY"
     } elseif ($hllvGameCheckBox.Checked) {
         "EASY SERVERS  |  HLLV"
@@ -786,8 +813,7 @@ function Update-GameSelectionPresentation {
 
     if ($script:ServerRows) {
         foreach ($key in @($script:ServerRows.Keys)) {
-            $gameDisabled = ($key -like "hllv:*" -and !$hllvGameCheckBox.Checked) -or
-                ($key -like "hllWw2:*" -and !$ww2GameCheckBox.Checked)
+            $gameDisabled = !(Test-DefinitionEnabled -Key $key)
             $row = $script:ServerRows[$key]
             if ($gameDisabled) {
                 $row.State.Text = "DISABLED"
@@ -806,7 +832,7 @@ function Update-GameSelectionPresentation {
         $startButton.ForeColor = if ($selectedGames.Count -gt 0) { $colors.Text } else { $colors.Muted }
         if ($selectedGames.Count -eq 0) {
             $mainStatusLabel.Text = "Choose a game to seed"
-            $statusDetailLabel.Text = "Select HLLV, HLL WW2, or both"
+            $statusDetailLabel.Text = "Select WARDOGS, HLLV, or HLL WW2"
         } elseif ($UpdateReadyMessage) {
             $mainStatusLabel.Text = "Ready to seed"
             $statusDetailLabel.Text = "Selected: $selectionText"
@@ -832,8 +858,7 @@ function Update-ServerRows {
         }
 
         $row = $script:ServerRows[$key]
-        $gameDisabled = ($key -like "hllv:*" -and !$hllvGameCheckBox.Checked) -or
-            ($key -like "hllWw2:*" -and !$ww2GameCheckBox.Checked)
+        $gameDisabled = !(Test-DefinitionEnabled -Key $key)
         $stateText = if ($gameDisabled) { "DISABLED" } else { "$($status.state)" }
         $row.Players.Text = if ($stateText -in @("DOWN", "UNAVAILABLE")) { "--/$($status.maxPlayers)" } else { "$($status.players)/$($status.maxPlayers)" }
         $row.State.Text = $stateText
@@ -859,20 +884,22 @@ function Start-LiveServerRefresh {
     }
 
     $requests = @()
+    $wardogsTask = $script:StatsHttpClient.GetStringAsync((Get-WardogsStatsUri))
     for ($index = 0; $index -lt $serverDefinitions.Count; $index++) {
         $definition = $serverDefinitions[$index]
         $server = $definition.Server
-        if ([string]::IsNullOrWhiteSpace("$($server.easyStatsUrl)")) {
+        if (!$server.joinCode -and [string]::IsNullOrWhiteSpace("$($server.easyStatsUrl)")) {
             continue
         }
 
-        $uri = "$($server.easyStatsUrl.TrimEnd('/'))/api/get_public_info"
+        $uri = if ($server.joinCode) { Get-WardogsStatsUri } else { "$($server.easyStatsUrl.TrimEnd('/'))/api/get_public_info" }
         $requests += [pscustomobject]@{
             Key = "$($definition.Key)"
             Label = "$($definition.Label)"
             GameId = "$($definition.GameId)"
             GameConfig = $definition.GameConfig
-            Task = $script:StatsHttpClient.GetStringAsync($uri)
+            Server = $server
+            Task = if ($server.joinCode) { $wardogsTask } else { $script:StatsHttpClient.GetStringAsync($uri) }
         }
     }
 
@@ -903,14 +930,15 @@ function Complete-LiveServerRefresh {
             $responseText = $request.Task.GetAwaiter().GetResult()
             $response = $responseText | ConvertFrom-Json
             $players = 0
-            $playerCountValue = $response.result.player_count
+            $wardogsData = if ($request.Server.joinCode) { ConvertFrom-WardogsSnapshot -Snapshot $response -Server $request.Server } else { $null }
+            $playerCountValue = if ($wardogsData) { $wardogsData.Players } else { $response.result.player_count }
             if ($null -eq $playerCountValue -or
                 ![int]::TryParse("$playerCountValue", [ref]$players) -or
                 $players -lt 0) {
                 throw "The stats page returned no valid player count."
             }
             $gameConfig = $request.GameConfig
-            $gameEnabled = if ($request.GameId -eq "hllv") { [bool]$hllvGameCheckBox.Checked } else { [bool]$ww2GameCheckBox.Checked }
+            $gameEnabled = Test-DefinitionEnabled -Key $request.Key
             $isUnderThreshold = $players -lt [int]$gameConfig.seedBelowPlayers
             $state = if (!$gameEnabled) {
                 "DISABLED"
@@ -929,7 +957,7 @@ function Complete-LiveServerRefresh {
                 state = $state
             }
         } catch {
-            $gameEnabled = if ($request.GameId -eq "hllv") { [bool]$hllvGameCheckBox.Checked } else { [bool]$ww2GameCheckBox.Checked }
+            $gameEnabled = Test-DefinitionEnabled -Key $request.Key
             if ($gameEnabled) {
                 $failedNumbers += "$($request.Label)"
             }
@@ -1018,13 +1046,15 @@ function Update-FromStatusFile {
 }
 
 function Save-GameSelection {
+    $config.enabledGames.wardogs = [bool]$wardogsGameCheckBox.Checked
+    ($config.wardogs.servers | Where-Object { $_.number -eq 'COMP' }).enabled = [bool]$compServerCheckBox.Checked
     $config.enabledGames.hllv = [bool]$hllvGameCheckBox.Checked
     $config.enabledGames.hllWw2 = [bool]$ww2GameCheckBox.Checked
     Write-JsonFileSafely -Value $config -Path $configPath -Depth 12
 }
 
 function Start-Seeder {
-    if (!$hllvGameCheckBox.Checked -and !$ww2GameCheckBox.Checked) {
+    if (!$wardogsGameCheckBox.Checked -and !$hllvGameCheckBox.Checked -and !$ww2GameCheckBox.Checked) {
         [System.Windows.Forms.MessageBox]::Show(
             $form,
             "Select at least one game to seed.",
@@ -1110,6 +1140,7 @@ function Start-Seeder {
     $countdownLabel.Text = "Server check in progress"
     Set-UiRunningState -Running $true
     $selectedGames = @()
+    if ($wardogsGameCheckBox.Checked) { $selectedGames += 'WARDOGS' }
     if ($hllvGameCheckBox.Checked) { $selectedGames += "HLLV" }
     if ($ww2GameCheckBox.Checked) { $selectedGames += "HLL WW2" }
     Add-Activity -Message "Seeder started for ${playerName}: $($selectedGames -join ' -> ')."
@@ -1149,9 +1180,9 @@ function Stop-Seeder {
 }
 
 $form = [System.Windows.Forms.Form]::new()
-$form.Text = "EASY Seeding Helper v2.3.5"
+$form.Text = "EASY Seeding Helper v3.0.0"
 $form.Icon = $script:AppIcon
-$form.ClientSize = [System.Drawing.Size]::new(900, 686)
+$form.ClientSize = [System.Drawing.Size]::new(900, 773)
 $form.StartPosition = [System.Windows.Forms.FormStartPosition]::CenterScreen
 $form.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::None
 $form.MaximizeBox = $false
@@ -1174,7 +1205,7 @@ if ($script:AppIconBitmap) {
 }
 
 $titleTextLabel = [System.Windows.Forms.Label]::new()
-$titleTextLabel.Text = "EASY SEEDING HELPER  //  v2.3.5"
+$titleTextLabel.Text = "EASY SEEDING HELPER  //  v3.0.0"
 $titleTextLabel.Font = New-UiFont -Size 8.5 -Style Bold
 $titleTextLabel.ForeColor = $colors.Muted
 $titleTextLabel.Location = [System.Drawing.Point]::new(40, 9)
@@ -1307,18 +1338,18 @@ $mainNavPanel.Controls.Add($mainNavAccentPanel)
 
 $mainContentPanel = [System.Windows.Forms.Panel]::new()
 $mainContentPanel.Location = [System.Drawing.Point]::new(1, 154)
-$mainContentPanel.Size = [System.Drawing.Size]::new(898, 531)
+$mainContentPanel.Size = [System.Drawing.Size]::new(898, 618)
 $mainContentPanel.BackColor = $colors.Background
 
 $hllvPage = [System.Windows.Forms.Panel]::new()
 $hllvPage.Location = [System.Drawing.Point]::new(0, 0)
-$hllvPage.Size = [System.Drawing.Size]::new(900, 532)
+$hllvPage.Size = [System.Drawing.Size]::new(900, 619)
 $hllvPage.BackColor = $colors.Background
 $hllvPage.ForeColor = $colors.Text
 
 $settingsPage = [System.Windows.Forms.Panel]::new()
 $settingsPage.Location = [System.Drawing.Point]::new(0, 0)
-$settingsPage.Size = [System.Drawing.Size]::new(900, 532)
+$settingsPage.Size = [System.Drawing.Size]::new(900, 619)
 $settingsPage.BackColor = $colors.Background
 $settingsPage.ForeColor = $colors.Text
 $settingsPage.Visible = $false
@@ -1392,7 +1423,7 @@ $hllvGameCheckBox.Font = New-UiFont -Size 8.5 -Style Bold
 $hllvGameCheckBox.ForeColor = $colors.Text
 $hllvGameCheckBox.BackColor = $colors.Surface
 $hllvGameCheckBox.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
-$hllvGameCheckBox.Location = [System.Drawing.Point]::new(584, 65)
+$hllvGameCheckBox.Location = [System.Drawing.Point]::new(678, 65)
 $hllvGameCheckBox.Size = [System.Drawing.Size]::new(70, 24)
 
 $ww2GameCheckBox = [System.Windows.Forms.CheckBox]::new()
@@ -1402,8 +1433,19 @@ $ww2GameCheckBox.Font = New-UiFont -Size 8.5 -Style Bold
 $ww2GameCheckBox.ForeColor = $colors.Text
 $ww2GameCheckBox.BackColor = $colors.Surface
 $ww2GameCheckBox.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
-$ww2GameCheckBox.Location = [System.Drawing.Point]::new(662, 65)
+$ww2GameCheckBox.Location = [System.Drawing.Point]::new(746, 65)
 $ww2GameCheckBox.Size = [System.Drawing.Size]::new(98, 24)
+
+$wardogsGameCheckBox = [System.Windows.Forms.CheckBox]::new()
+$wardogsGameCheckBox.Text = 'WARDOGS'
+$wardogsGameCheckBox.Checked = [bool]$config.enabledGames.wardogs
+$wardogsGameCheckBox.Font = New-UiFont -Size 8.5 -Style Bold
+$wardogsGameCheckBox.ForeColor = $colors.Text
+$wardogsGameCheckBox.BackColor = $colors.Surface
+$wardogsGameCheckBox.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
+$wardogsGameCheckBox.Location = [System.Drawing.Point]::new(580, 65)
+$wardogsGameCheckBox.Size = [System.Drawing.Size]::new(98, 24)
+$statusPanel.Controls.Add($wardogsGameCheckBox)
 
 $statusPanel.Controls.Add($statusAccentPanel)
 $statusPanel.Controls.Add($statusTopRail)
@@ -1422,11 +1464,11 @@ $serversTitle.Text = "EASY SERVERS  |  HLLV PRIORITY"
 $serversTitle.Font = New-UiFont -Size 9 -Style Bold
 $serversTitle.ForeColor = $colors.Cyan
 $serversTitle.Location = [System.Drawing.Point]::new(20, 122)
-$serversTitle.Size = [System.Drawing.Size]::new(200, 20)
+$serversTitle.Size = [System.Drawing.Size]::new(340, 20)
 
 $serversPanel = [System.Windows.Forms.Panel]::new()
 $serversPanel.Location = [System.Drawing.Point]::new(20, 146)
-$serversPanel.Size = [System.Drawing.Size]::new(852, 206)
+$serversPanel.Size = [System.Drawing.Size]::new(852, 293)
 $serversPanel.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Left
 $serversPanel.BackColor = $colors.Surface
 
@@ -1555,11 +1597,11 @@ $activityTitle = [System.Windows.Forms.Label]::new()
 $activityTitle.Text = "EVENT STREAM"
 $activityTitle.Font = New-UiFont -Size 9 -Style Bold
 $activityTitle.ForeColor = $colors.Cyan
-$activityTitle.Location = [System.Drawing.Point]::new(20, 366)
+$activityTitle.Location = [System.Drawing.Point]::new(20, 453)
 $activityTitle.Size = [System.Drawing.Size]::new(200, 20)
 
 $activityBox = [System.Windows.Forms.RichTextBox]::new()
-$activityBox.Location = [System.Drawing.Point]::new(20, 390)
+$activityBox.Location = [System.Drawing.Point]::new(20, 477)
 $activityBox.Size = [System.Drawing.Size]::new(852, 102)
 $activityBox.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Left
 $activityBox.BackColor = $colors.Terminal
@@ -1573,7 +1615,7 @@ $countdownLabel = [System.Windows.Forms.Label]::new()
 $countdownLabel.Text = "Not running"
 $countdownLabel.Font = New-UiFont -Size 9.5 -Style Bold
 $countdownLabel.ForeColor = $colors.Cyan
-$countdownLabel.Location = [System.Drawing.Point]::new(20, 505)
+$countdownLabel.Location = [System.Drawing.Point]::new(20, 592)
 $countdownLabel.Size = [System.Drawing.Size]::new(430, 22)
 $countdownLabel.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Left
 
@@ -1582,8 +1624,8 @@ $behaviorLabel.Text = "Selected games stop at $($config.seededAtPlayers)/$($conf
 $behaviorLabel.Font = New-UiFont -Size 9
 $behaviorLabel.ForeColor = $colors.Muted
 $behaviorLabel.TextAlign = [System.Drawing.ContentAlignment]::TopRight
-$behaviorLabel.Location = [System.Drawing.Point]::new(496, 505)
-$behaviorLabel.Size = [System.Drawing.Size]::new(376, 22)
+$behaviorLabel.Location = [System.Drawing.Point]::new(420, 592)
+$behaviorLabel.Size = [System.Drawing.Size]::new(452, 22)
 $behaviorLabel.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Left
 
 $form.Controls.Add($titleBarPanel)
@@ -1630,6 +1672,12 @@ $ww2SettingsNavButton.Size = [System.Drawing.Size]::new(130, 32)
 $ww2SettingsNavButton.ForeColor = $colors.Muted
 $gameSettingsNavPanel.Controls.Add($ww2SettingsNavButton)
 
+$wardogsSettingsNavButton = New-FlatButton -Text 'WARDOGS' -BackColor $colors.Background -Width 130
+$wardogsSettingsNavButton.Location = [System.Drawing.Point]::new(260, 0)
+$wardogsSettingsNavButton.Size = [System.Drawing.Size]::new(130, 32)
+$wardogsSettingsNavButton.ForeColor = $colors.Muted
+$gameSettingsNavPanel.Controls.Add($wardogsSettingsNavButton)
+
 $gameSettingsNavAccentPanel = [System.Windows.Forms.Panel]::new()
 $gameSettingsNavAccentPanel.Location = [System.Drawing.Point]::new(0, 30)
 $gameSettingsNavAccentPanel.Size = [System.Drawing.Size]::new(130, 2)
@@ -1638,11 +1686,34 @@ $gameSettingsNavPanel.Controls.Add($gameSettingsNavAccentPanel)
 
 $hllvTiming = New-GameTimingPage -GameConfig $config -GameName "HLLV"
 $ww2Timing = New-GameTimingPage -GameConfig $config.hllWw2 -GameName "HLL WW2"
+$wardogsTiming = New-GameTimingPage -GameConfig $config.wardogs -GameName 'WARDOGS'
+$wardogsSettingsPage = $wardogsTiming.Panel
+$wardogsSettingsPage.Visible = $false
 $hllvSettingsPage = $hllvTiming.Panel
 $ww2SettingsPage = $ww2Timing.Panel
 $ww2SettingsPage.Visible = $false
 
-$script:TimingInputs = @($hllvTiming.Inputs) + @($ww2Timing.Inputs)
+$script:TimingInputs = @($hllvTiming.Inputs) + @($ww2Timing.Inputs) + @($wardogsTiming.Inputs)
+
+$compServerCheckBox = [System.Windows.Forms.CheckBox]::new()
+$compServerCheckBox.Text = 'Include WARDOGS Comp / NA CENTRAL'
+$compServerCheckBox.Checked = [bool](($config.wardogs.servers | Where-Object { $_.number -eq 'COMP' }).enabled)
+$compServerCheckBox.Font = New-UiFont -Size 9 -Style Bold
+$compServerCheckBox.ForeColor = $colors.Text
+$compServerCheckBox.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
+$compServerCheckBox.Location = [System.Drawing.Point]::new(22, 540)
+$compServerCheckBox.Size = [System.Drawing.Size]::new(385, 26)
+$settingsPage.Controls.Add($compServerCheckBox)
+
+$wardogsSourceLink = [System.Windows.Forms.LinkLabel]::new()
+$wardogsSourceLink.Text = 'WARDOGS data: Wardog Servers (community API)'
+$wardogsSourceLink.LinkColor = $colors.Cyan
+$wardogsSourceLink.ActiveLinkColor = $colors.Text
+$wardogsSourceLink.Font = New-UiFont -Size 9
+$wardogsSourceLink.Location = [System.Drawing.Point]::new(22, 577)
+$wardogsSourceLink.Size = [System.Drawing.Size]::new(400, 22)
+$wardogsSourceLink.Add_LinkClicked({ Start-Process 'https://wardogservers.com/devs' })
+$settingsPage.Controls.Add($wardogsSourceLink)
 
 $settingsLockLabel = [System.Windows.Forms.Label]::new()
 $settingsLockLabel.Text = "Stop the seeder before changing timing settings."
@@ -1677,6 +1748,7 @@ $settingsPage.Controls.Add($settingsSubtitle)
 $settingsPage.Controls.Add($gameSettingsNavPanel)
 $settingsPage.Controls.Add($hllvSettingsPage)
 $settingsPage.Controls.Add($ww2SettingsPage)
+$settingsPage.Controls.Add($wardogsSettingsPage)
 $settingsPage.Controls.Add($settingsLockLabel)
 $settingsPage.Controls.Add($settingsStatusLabel)
 $settingsPage.Controls.Add($createShortcutButton)
@@ -1706,6 +1778,9 @@ $settingsNavButton.Add_Click({
 })
 
 $hllvSettingsNavButton.Add_Click({
+    $wardogsSettingsPage.Visible = $false
+    $wardogsSettingsNavButton.BackColor = $colors.Background
+    $wardogsSettingsNavButton.ForeColor = $colors.Muted
     $ww2SettingsPage.Visible = $false
     $hllvSettingsPage.Visible = $true
     $hllvSettingsPage.BringToFront()
@@ -1717,6 +1792,9 @@ $hllvSettingsNavButton.Add_Click({
 })
 
 $ww2SettingsNavButton.Add_Click({
+    $wardogsSettingsPage.Visible = $false
+    $wardogsSettingsNavButton.BackColor = $colors.Background
+    $wardogsSettingsNavButton.ForeColor = $colors.Muted
     $hllvSettingsPage.Visible = $false
     $ww2SettingsPage.Visible = $true
     $ww2SettingsPage.BringToFront()
@@ -1725,6 +1803,20 @@ $ww2SettingsNavButton.Add_Click({
     $hllvSettingsNavButton.BackColor = $colors.Background
     $hllvSettingsNavButton.ForeColor = $colors.Muted
     $gameSettingsNavAccentPanel.Left = 130
+})
+
+$wardogsSettingsNavButton.Add_Click({
+    $hllvSettingsPage.Visible = $false
+    $ww2SettingsPage.Visible = $false
+    $wardogsSettingsPage.Visible = $true
+    $wardogsSettingsPage.BringToFront()
+    $wardogsSettingsNavButton.BackColor = $colors.SurfaceAlt
+    $wardogsSettingsNavButton.ForeColor = $colors.Text
+    $hllvSettingsNavButton.BackColor = $colors.Background
+    $hllvSettingsNavButton.ForeColor = $colors.Muted
+    $ww2SettingsNavButton.BackColor = $colors.Background
+    $ww2SettingsNavButton.ForeColor = $colors.Muted
+    $gameSettingsNavAccentPanel.Left = 260
 })
 
 $createShortcutButton.Add_Click({
@@ -1758,7 +1850,15 @@ $restoreTimingButton.Add_Click({
     $ww2Timing.Focus.Value = 15
     $ww2Timing.Browser.Value = 10
     $ww2Timing.Search.Value = 8
-    $settingsStatusLabel.Text = "Recommended HLLV and WW2 values loaded. Click Save Settings."
+    $wardogsTiming.Poll.Value = 60
+    $wardogsTiming.Launch.Value = 90
+    $wardogsTiming.Close.Value = 15
+    $wardogsTiming.Join.Value = 120
+    $wardogsTiming.Menu.Value = 15
+    $wardogsTiming.Focus.Value = 5
+    $wardogsTiming.Browser.Value = 15
+    $wardogsTiming.Search.Value = 8
+    $settingsStatusLabel.Text = "Recommended values loaded for all games. Click Save Settings."
     $settingsStatusLabel.ForeColor = $colors.Amber
 })
 
@@ -1785,14 +1885,22 @@ $saveSettingsButton.Add_Click({
         $config.hllWw2.uiAutomation.afterFocusClickWaitSeconds = [int]$ww2Timing.Focus.Value
         $config.hllWw2.uiAutomation.browserWaitSeconds = [int]$ww2Timing.Browser.Value
         $config.hllWw2.uiAutomation.searchWaitSeconds = [int]$ww2Timing.Search.Value
+        $config.wardogs.pollSeconds = [int]$wardogsTiming.Poll.Value
+        $config.wardogs.launchWaitSeconds = [int]$wardogsTiming.Launch.Value
+        $config.wardogs.closeGraceSeconds = [int]$wardogsTiming.Close.Value
+        $config.wardogs.uiAutomation.joinWaitSeconds = [int]$wardogsTiming.Join.Value
+        $config.wardogs.uiAutomation.menuReadyWaitSeconds = [int]$wardogsTiming.Menu.Value
+        $config.wardogs.uiAutomation.afterFocusClickWaitSeconds = [int]$wardogsTiming.Focus.Value
+        $config.wardogs.uiAutomation.browserWaitSeconds = [int]$wardogsTiming.Browser.Value
+        $config.wardogs.uiAutomation.searchWaitSeconds = [int]$wardogsTiming.Search.Value
 
         Write-JsonFileSafely -Value $config -Path $configPath -Depth 12
 
         Update-GameSelectionPresentation
         $script:NextLiveRefresh = (Get-Date).AddSeconds([int]$config.pollSeconds)
-        $settingsStatusLabel.Text = "HLLV and HLL WW2 timing saved at $((Get-Date).ToString('h:mm:ss tt'))"
+        $settingsStatusLabel.Text = "Timing saved for all games at $((Get-Date).ToString('h:mm:ss tt'))"
         $settingsStatusLabel.ForeColor = $colors.Green
-        Add-Activity -Message "HLLV and HLL WW2 timing settings saved."
+        Add-Activity -Message "WARDOGS, HLLV, and HLL WW2 timing settings saved."
     } catch {
         $settingsStatusLabel.Text = "Settings could not be saved. Open the log for details."
         $settingsStatusLabel.ForeColor = $colors.Red
@@ -1806,7 +1914,7 @@ $toolTip.SetToolTip($stopButton, "Stop the helper. Any running game will remain 
 $toolTip.SetToolTip($editPlayerButton, "Change the exact Steam name used for EASY stats.")
 $toolTip.SetToolTip($openLogButton, "Open the full troubleshooting log in Notepad.")
 $toolTip.SetToolTip($createShortcutButton, "Create or restore the EASY Seeding Helper shortcut on your Desktop.")
-$toolTip.SetToolTip($restoreTimingButton, "Load the measured HLLV and HLL WW2 timing values without saving yet.")
+$toolTip.SetToolTip($restoreTimingButton, "Load the recommended timing values for all games without saving yet.")
 $toolTip.SetToolTip($saveSettingsButton, "Save timing changes to this Desktop copy.")
 
 $script:SeederProcess = Find-SeederProcess
@@ -1820,6 +1928,20 @@ $script:NextLiveRefresh = Get-Date
 $script:LastLiveRefresh = $null
 $script:LastStatsUpdate = $null
 $script:NextSystemIndicatorUpdate = Get-Date
+
+foreach ($checkBox in @($wardogsGameCheckBox, $compServerCheckBox)) {
+    $checkBox.Add_CheckedChanged({
+        if (!(Test-SeederRunning)) {
+            try {
+                Save-GameSelection
+                $script:NextLiveRefresh = Get-Date
+                Update-GameSelectionPresentation -UpdateReadyMessage
+            } catch {
+                Add-Activity -Message "WARDOGS selection could not be saved: $($_.Exception.Message)"
+            }
+        }
+    })
+}
 
 $hllvGameCheckBox.Add_CheckedChanged({
     if (!(Test-SeederRunning)) {

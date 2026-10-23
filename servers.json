@@ -1,8 +1,9 @@
 {
-    "version":  "2.3.5",
+    "version":  "3.0.0",
     "enabledGames":  {
                          "hllv":  true,
-                         "hllWw2":  false
+                         "hllWw2":  false,
+                         "wardogs":  false
                      },
     "steamAppId":  3079210,
     "playerProfileFile":  "player-profile.json",
@@ -125,5 +126,66 @@
                                        "enabled":  true
                                    }
                                ]
-               }
+               },
+    "wardogs":  {
+                    "displayName":  "WARDOGS",
+                    "steamAppId":  1867240,
+                    "seedBelowPlayers":  50,
+                    "activeSeedPlayers":  3,
+                    "seededAtPlayers":  50,
+                    "maxPlayers":  100,
+                    "launchWaitSeconds":  90,
+                    "postClickWaitSeconds":  60,
+                    "pollSeconds":  60,
+                    "reconnectWaitSeconds":  60,
+                    "connectionMissesBeforeRestart":  3,
+                    "closeGraceSeconds":  15,
+                    "activityClickSeconds":  5,
+                    "gameProcessNames":  [
+                                             "WardogsClient-Win64-Shipping",
+                                             "WardogsLauncher-Shipping"
+                                         ],
+                    "uiAutomation":  {
+                                         "enabled":  true,
+                                         "referenceWidth":  1920,
+                                         "referenceHeight":  1080,
+                                         "focusX":  960,
+                                         "focusY":  865,
+                                         "enlistX":  225,
+                                         "enlistY":  799,
+                                         "enlistClickCount":  1,
+                                         "searchX":  300,
+                                         "searchY":  150,
+                                         "joinX":  1600,
+                                         "joinY":  1000,
+                                         "menuReadyWaitSeconds":  15,
+                                         "afterFocusClickWaitSeconds":  5,
+                                         "browserWaitSeconds":  15,
+                                         "searchWaitSeconds":  8,
+                                         "joinWaitSeconds":  120
+                                     },
+                    "servers":  [
+                                    {
+                                        "number":  "EAST",
+                                        "name":  "EASY Company | NA EAST | discord.gg/easycompany",
+                                        "searchText":  "EASY Company | NA EAST",
+                                        "joinCode":  "797c7a1a-5a3a-48c8-a39b-88f392730d05",
+                                        "enabled":  true
+                                    },
+                                    {
+                                        "number":  "WEST",
+                                        "name":  "EASY Company | NA WEST | discord.gg/easycompany",
+                                        "searchText":  "EASY Company | NA WEST",
+                                        "joinCode":  "c3bb6255-fe3b-44e9-a993-5605efc4eb2d",
+                                        "enabled":  true
+                                    },
+                                    {
+                                        "number":  "COMP",
+                                        "name":  "EASY Company | Comp | NA CENTRAL | discord.gg/easycompany",
+                                        "searchText":  "EASY Company | Comp | NA CENTRAL",
+                                        "joinCode":  "1aab33d8-a44b-4c62-8d5c-f51281e413f6",
+                                        "enabled":  false
+                                    }
+                                ]
+                }
 }
