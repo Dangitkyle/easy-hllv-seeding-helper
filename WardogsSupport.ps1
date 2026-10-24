@@ -478,17 +478,25 @@ function Get-WardogsConnectionState {
     $sessionMatches = $script:WardogsSession -and $process -and
         $script:WardogsSession.ProcessId -eq $process.Id -and $script:WardogsSession.JoinCode -eq $Server.joinCode
     $connected = $null
-    if (!$sessionMatches -or $screen.State -in @('Closed', 'Disconnected', 'MainMenu', 'Browser', 'BrowserType', 'Start', 'FindServer')) {
+    $detail = "WARDOGS connection unverified (screen: $($screen.State)). No player roster is available; keeping the game open."
+    if (!$sessionMatches) {
         $connected = $false
+        $detail = if (!$process) { 'WARDOGS game process is no longer running.' } else { 'The verified WARDOGS join session no longer matches this game process and server.' }
+    } elseif ($screen.State -in @('Closed', 'Disconnected', 'MainMenu', 'Browser', 'BrowserType', 'Start', 'FindServer')) {
+        $connected = $false
+        $detail = "WARDOGS returned to a non-match screen: $($screen.State)."
     } elseif ($screen.State -eq 'Match') {
         $connected = $true
         $script:WardogsSession.LastMatchedAt = Get-Date
+        $detail = 'WARDOGS match screen recognized for the joined session.'
+        if (!$script:WardogsActivityWorker) { Start-WardogsActivity -Config $Config }
     } elseif ($screen.State -eq 'Faction') {
         Select-WardogsFaction -Config $Config
-    } elseif ($screen.State -ne 'Background' -and
-        ((Get-Date) - $script:WardogsSession.LastMatchedAt).TotalSeconds -gt 180) {
-        $connected = $false
+        $detail = 'WARDOGS team selection retried; waiting for the match screen. Keeping the game open.'
+    } elseif ($screen.State -eq 'Background') {
+        $detail = 'WARDOGS connection unverified while in the background. Keeping the game open. Activity paused: bring WARDOGS to the front.'
     }
+    # Unrecognized screens are not evidence of a disconnect, regardless of elapsed time.
     [pscustomobject]@{
         Connected = $connected
         Known = $null -ne $connected
@@ -496,6 +504,6 @@ function Get-WardogsConnectionState {
         OnlinePlayerCount = 0
         MatchingStatuses = @($screen.State)
         MatchingNames = @()
-        Detail = if ($screen.State -eq 'Background') { 'Activity paused: bring WARDOGS to the front.' } else { "Waiting for WARDOGS match screen ($($screen.State))." }
+        Detail = $detail
     }
 }

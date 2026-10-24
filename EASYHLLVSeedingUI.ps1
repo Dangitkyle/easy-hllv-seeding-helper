@@ -1180,7 +1180,7 @@ function Stop-Seeder {
 }
 
 $form = [System.Windows.Forms.Form]::new()
-$form.Text = "EASY Seeding Helper v3.0.0"
+$form.Text = "EASY Seeding Helper v3.0.1"
 $form.Icon = $script:AppIcon
 $form.ClientSize = [System.Drawing.Size]::new(900, 773)
 $form.StartPosition = [System.Windows.Forms.FormStartPosition]::CenterScreen
@@ -1205,7 +1205,7 @@ if ($script:AppIconBitmap) {
 }
 
 $titleTextLabel = [System.Windows.Forms.Label]::new()
-$titleTextLabel.Text = "EASY SEEDING HELPER  //  v3.0.0"
+$titleTextLabel.Text = "EASY SEEDING HELPER  //  v3.0.1"
 $titleTextLabel.Font = New-UiFont -Size 8.5 -Style Bold
 $titleTextLabel.ForeColor = $colors.Muted
 $titleTextLabel.Location = [System.Drawing.Point]::new(40, 9)

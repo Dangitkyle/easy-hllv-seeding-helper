@@ -1,4 +1,4 @@
-# EASY Seeding Helper v3.0.0
+# EASY Seeding Helper v3.0.1
 
 ## First-Time Setup
 
@@ -47,6 +47,7 @@
 
 - Keep WARDOGS in the foreground while seeding. Activity clicks pause when another app is in front or WARDOGS is minimized.
 - The helper joins by server ID, quickly clicks all three faction choices, and confirms the match screen before clicking every five seconds.
+- WARDOGS has no player roster available to the helper. An unrecognized screen is shown as unverified and does not close the game. Activity clicks pause until the match screen is recognized again.
 - Use the game's English interface and have Windows English OCR support installed.
 - To seed the competition server, open **Settings** and check **Include WARDOGS Comp / NA CENTRAL** while the seeder is stopped.
 - Counts come from the [Wardog Servers community API](https://wardogservers.com/devs), which can be a few minutes behind the game. Unavailable or stale data is skipped.

@@ -18,7 +18,7 @@ function Assert-Rejected([scriptblock]$Action, [string]$Name) {
 }
 
 $config = Get-Content -LiteralPath (Join-Path $basePath 'servers.json') -Raw | ConvertFrom-Json
-Assert-Equal $config.version '3.0.0' 'Release version'
+Assert-Equal $config.version '3.0.1' 'Release version'
 Initialize-WardogsConfig -Config $config
 $config.enabledGames.wardogs = $true
 $config.enabledGames.hllv = $true

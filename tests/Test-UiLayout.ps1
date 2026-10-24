@@ -12,7 +12,7 @@ foreach ($statement in $ast.EndBlock.Statements) {
 try {
     Set-UiRunningState -Running $false
     Update-GameSelectionPresentation -UpdateReadyMessage
-    if ($form.Text -ne 'EASY Seeding Helper v3.0.0') { throw 'Incorrect window version.' }
+    if ($form.Text -ne 'EASY Seeding Helper v3.0.1') { throw 'Incorrect window version.' }
     if ($script:ServerRows.Count -ne 9) { throw 'Expected nine server rows.' }
     foreach ($row in $script:ServerRows.Values) {
         if ($row.RowPanel.Bottom -gt $serversPanel.ClientSize.Height) { throw 'Server row is clipped.' }
@@ -33,7 +33,7 @@ try {
             $bitmap.Save($PreviewPath, [Drawing.Imaging.ImageFormat]::Png)
         } finally { $bitmap.Dispose() }
     }
-    'PASS: v3.0.0 dashboard, nine server rows, footer, and WARDOGS settings layout.'
+    'PASS: v3.0.1 dashboard, nine server rows, footer, and WARDOGS settings layout.'
 } finally {
     $form.Dispose()
     $script:StatsHttpClient.Dispose()

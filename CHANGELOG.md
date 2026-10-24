@@ -1,5 +1,11 @@
 # Changelog
 
+## v3.0.1
+
+- Keeps WARDOGS open when screen recognition is uncertain instead of treating a three-minute timeout as a disconnect.
+- Uses screen/session details in WARDOGS recovery logs instead of implying a player roster was checked.
+- Resumes activity clicks when the match screen is recognized again after a screen-check error.
+
 ## v3.0.0
 
 - Adds WARDOGS seeding for EASY NA EAST and NA WEST, with optional Comp / NA CENTRAL.

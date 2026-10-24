@@ -394,7 +394,7 @@ function Invoke-GameClick {
 }
 
 $DefaultConfig = [ordered]@{
-    version = "3.0.0"
+    version = "3.0.1"
     enabledGames = [ordered]@{ hllv = $true; hllWw2 = $true }
     steamAppId = 3079210
     playerProfileFile = "player-profile.json"
@@ -523,7 +523,7 @@ function Publish-SeederStatus {
     }
 
     $payload = [ordered]@{
-        version = "3.0.0"
+        version = "3.0.1"
         running = $Running
         playerName = $script:StatusPlayerName
         message = $script:StatusMessage
@@ -600,7 +600,7 @@ function Show-SeedingDashboard {
     }
 
     Clear-Host
-    Write-Host "EASY Seeding Helper v3.0.0"
+    Write-Host "EASY Seeding Helper v3.0.1"
     Write-Host ""
     Write-Host "Player: $PlayerName"
     Write-Host "Status: $Message"
@@ -737,7 +737,7 @@ function Get-Config {
     }
 
     $config = Get-Content -Path $ConfigPath -Raw | ConvertFrom-Json
-    if (!$config.version) { $config | Add-Member -NotePropertyName version -NotePropertyValue "3.0.0" }
+    if (!$config.version) { $config | Add-Member -NotePropertyName version -NotePropertyValue "3.0.1" }
     if (!$config.enabledGames) {
         $config | Add-Member -NotePropertyName enabledGames -NotePropertyValue ([pscustomobject]@{ hllv = $true; hllWw2 = $true })
     }
@@ -1331,7 +1331,9 @@ do {
             continue
         }
         if (!$connectionState.Connected) {
-            $detectionDetail = if ($connectionState.MatchFound) {
+            $detectionDetail = if ($gameConfig.gameId -eq 'wardogs') {
+                $connectionState.Detail
+            } elseif ($connectionState.MatchFound) {
                 "matching stats row status: $(@($connectionState.MatchingStatuses) -join ', ')"
             } else {
                 "name absent from $($connectionState.OnlinePlayerCount) online stats row(s)"
@@ -1339,7 +1341,11 @@ do {
 
             $failedKey = Get-ServerStatusKey -Status $currentStatus[0]
             $skippedServerUntil[$failedKey] = (Get-Date).AddSeconds([int]$gameConfig.pollSeconds)
-            Write-Log "$steamName was not confirmed on $($server.name) ($detectionDetail). Treating the connection as failed, skipping this server for the current scan, and continuing by priority."
+            if ($gameConfig.gameId -eq 'wardogs') {
+                Write-Log "$detectionDetail Skipping WARDOGS server $serverNumber for the current scan and continuing by priority."
+            } else {
+                Write-Log "$steamName was not confirmed on $($server.name) ($detectionDetail). Treating the connection as failed, skipping this server for the current scan, and continuing by priority."
+            }
             Stop-Game -Config $gameConfig
             $restartScan = $true
             break
